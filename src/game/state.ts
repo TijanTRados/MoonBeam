@@ -160,9 +160,11 @@ export class Game {
   advance(dt: number): boolean {
     if (this.phase !== "running" || !this.sim) return true;
     const hops = Math.max(1, Math.max(...this.sim.segments.map((s) => s.order), 1));
-    // Constant speed in hops/second, so long paths take longer — the original's
-    // travelling-ball pacing, which is most of its charm.
-    this.reveal += (dt * 9) / (hops + 1);
+    // Roughly constant speed in hops/second, so a long path visibly takes
+    // longer — the original's travelling-ball pacing, which is most of its
+    // charm. Floored so that a beam ricocheting around the whole grid still
+    // resolves in about two and a half seconds instead of twelve.
+    this.reveal += dt * Math.max(0.45, 9 / (hops + 1));
 
     for (const s of this.sim.starsLit) {
       const seg = this.sim.segments.find((g) => g.x1 + g.y1 * this.level.w === s);
