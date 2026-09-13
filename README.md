@@ -228,6 +228,7 @@ npx cap open android
 ## Layout
 
 ```
+legacy-2015/      the original Android app, kept unchanged — see its README
 src/
   engine/          pure, no DOM — the part the generator runs thousands of times
     types.ts         directions, light masks, tiles, levels

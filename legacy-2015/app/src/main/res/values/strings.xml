@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">MoonBeam</string>
+
+    <string name="hello_world">Hello world!</string>
+    <string name="action_settings">Settings</string>
+    <string name="title_activity_main">Main</string>
+    <string name="title_activity_levels">Levels</string>
+    <string name="title_activity_level1">LEVEL1</string>
+    <string name="title_activity_howto">Howto</string>
+    <string name="title_activity_level2">LEVEL2</string>
+    <string name="title_activity_level3">LEVEL3</string>
+    <string name="title_activity_level4">LEVEL4</string>
+    <string name="title_activity_level5">LEVEL5</string>
+    <string name="title_activity_level6">LEVEL6</string>
+    <string name="title_activity_level7">LEVEL7</string>
+    <string name="title_activity_level8">LEVEL8</string>
+    <string name="title_activity_level9">LEVEL9</string>
+</resources>

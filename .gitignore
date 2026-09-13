@@ -7,3 +7,6 @@ dist/
 # Capacitor native projects are generated; regenerate with `npx cap add android`
 android/
 ios/
+
+# Vite would try to serve the legacy Android project; it is here to be read.
+legacy-2015/app/build/
