@@ -1,0 +1,26 @@
+{
+  "name": "moonbeam",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "A cozy lo-fi light-routing puzzle. The moon shines; you build the path.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "tsx test/engine.test.ts",
+    "gen": "tsx tools/gen-report.ts",
+    "android": "npm run build && npx cap sync android && npx cap open android"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
+    "@types/node": "^22.20.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2"
+  }
+}

@@ -1,0 +1,347 @@
+/* MoonBeam — cozy lo-fi night UI. */
+
+:root {
+  --night-deep: #120e26;
+  --night-mid: #1a1438;
+  --night-soft: #231a4d;
+  --panel: rgba(255, 255, 255, 0.045);
+  --panel-edge: rgba(226, 216, 255, 0.13);
+  --ink: #ece5ff;
+  --ink-dim: #9c92c4;
+  --accent: #c8a6ff;
+  --accent-warm: #ffd07d;
+  --moon: #ffe6a8;
+  --radius: 14px;
+  --tap: 48px;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--night-deep);
+  color: var(--ink);
+  font-family: Nunito, ui-rounded, "Segoe UI", system-ui, sans-serif;
+  font-size: 16px;
+  overscroll-behavior: none;
+}
+
+body { -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+
+#app {
+  position: relative;
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.screen.is-active { display: flex; }
+
+/* ------------------------------------------------------------- title */
+
+#screen-title {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.title-art { position: absolute; inset: 0; z-index: 0; }
+.title-art canvas { width: 100%; height: 100%; display: block; }
+
+/* Scrim so the decorative board never competes with the type. */
+.title-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 42% at 50% 46%, rgba(18, 14, 38, 0.92), rgba(18, 14, 38, 0.4) 70%, transparent),
+    linear-gradient(180deg, rgba(18, 14, 38, 0.55), transparent 22%, transparent 78%, rgba(18, 14, 38, 0.65));
+}
+
+/* Only set stacking here — setting `position` would clobber .credit's own. */
+.logo, .tagline, .menu { position: relative; z-index: 1; }
+
+.logo {
+  font-family: "Pixelify Sans", ui-monospace, monospace;
+  font-size: clamp(44px, 13vw, 82px);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0;
+  color: var(--moon);
+  text-shadow: 0 0 28px rgba(255, 230, 168, 0.45), 0 0 64px rgba(200, 166, 255, 0.28);
+}
+.logo span { color: var(--accent); }
+
+.tagline {
+  margin: 10px 0 30px;
+  color: var(--ink-dim);
+  line-height: 1.55;
+  font-size: 15px;
+}
+
+.menu { display: flex; flex-direction: column; gap: 10px; width: min(290px, 78vw); }
+
+.credit {
+  position: absolute;
+  z-index: 1;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  left: 0; right: 0;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(156, 146, 196, 0.65);
+}
+
+/* ------------------------------------------------------------- buttons */
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: 12px 22px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.18s ease, border-color 0.18s ease;
+  backdrop-filter: blur(6px);
+}
+.btn:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(226, 216, 255, 0.26); }
+.btn:active { transform: scale(0.97); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.btn-primary {
+  background: linear-gradient(180deg, #d9b4ff, #a884f0);
+  border-color: transparent;
+  color: #1a1030;
+  font-weight: 700;
+  box-shadow: 0 6px 22px rgba(168, 132, 240, 0.32);
+}
+.btn-primary:hover { background: linear-gradient(180deg, #e3c4ff, #b492f5); }
+
+.btn-run {
+  background: linear-gradient(180deg, #ffe9b4, #f5c777);
+  color: #2a1c05;
+  box-shadow: 0 6px 22px rgba(245, 199, 119, 0.34);
+}
+.btn-run:hover { background: linear-gradient(180deg, #fff0c9, #ffd489); }
+
+.btn-ghost { background: transparent; }
+.btn-quiet { background: transparent; border-color: transparent; color: var(--ink-dim); }
+
+.icon-btn {
+  appearance: none;
+  width: var(--tap); height: var(--tap);
+  border-radius: 50%;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid; place-items: center;
+  flex: none;
+}
+.icon-btn:active { transform: scale(0.94); }
+
+/* ------------------------------------------------------------- bars */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  flex: none;
+}
+.bar h2 { margin: 0; font-size: 17px; font-weight: 700; }
+.bar-title { flex: 1; min-width: 0; text-align: center; }
+.bar-spacer { width: var(--tap); flex: none; }
+
+.meta {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.pips { display: inline-flex; gap: 3px; }
+.pip { width: 6px; height: 6px; border-radius: 50%; background: rgba(226, 216, 255, 0.2); }
+.pip.on { background: var(--accent-warm); }
+
+/* ------------------------------------------------------------- board */
+
+.board-wrap { position: relative; flex: 1; min-height: 0; }
+#board { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.toast {
+  position: absolute;
+  left: 50%; bottom: 14px;
+  transform: translate(-50%, 8px);
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(18, 14, 38, 0.86);
+  border: 1px solid var(--panel-edge);
+  font-size: 13px;
+  color: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  backdrop-filter: blur(8px);
+  max-width: 88%;
+  text-align: center;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ------------------------------------------------------------- tray */
+
+.tray {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  flex: none;
+}
+
+.slot {
+  position: relative;
+  width: 58px; height: 58px;
+  border-radius: var(--radius);
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  display: grid; place-items: center;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.18s ease, background 0.18s ease;
+  padding: 0;
+}
+.slot canvas { width: 42px; height: 42px; display: block; }
+.slot.selected {
+  border-color: var(--accent);
+  background: rgba(200, 166, 255, 0.16);
+  box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgba(200, 166, 255, 0.22);
+}
+.slot.empty { opacity: 0.32; cursor: default; }
+.slot:active { transform: scale(0.95); }
+
+.slot .count {
+  position: absolute;
+  right: -5px; top: -5px;
+  min-width: 21px; height: 21px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #1a1030;
+  font-size: 12px; font-weight: 700;
+  display: grid; place-items: center;
+  font-family: "Pixelify Sans", monospace;
+}
+
+.controls {
+  display: flex; gap: 10px;
+  padding: 4px 12px calc(14px + env(safe-area-inset-bottom));
+  flex: none;
+}
+.controls .btn { flex: 1; }
+.controls .btn-primary { flex: 2; }
+
+/* ------------------------------------------------------------- nights */
+
+.night-grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 10px;
+  padding: 4px 14px calc(20px + env(safe-area-inset-bottom));
+  align-content: start;
+}
+
+.night {
+  aspect-ratio: 1;
+  border-radius: var(--radius);
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+  color: var(--ink);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  font-family: "Pixelify Sans", monospace;
+  font-size: 21px;
+  padding: 0;
+}
+.night:active { transform: scale(0.96); }
+.night.locked { opacity: 0.3; cursor: not-allowed; }
+.night .stars { font-size: 10px; letter-spacing: 1px; color: var(--accent-warm); min-height: 12px; }
+.night .diff { font-size: 9px; color: var(--ink-dim); font-family: Nunito, sans-serif; }
+
+/* ------------------------------------------------------------- overlays */
+
+.overlay {
+  position: absolute; inset: 0;
+  z-index: 10;
+  display: grid; place-items: center;
+  background: rgba(12, 9, 26, 0.72);
+  backdrop-filter: blur(10px);
+  padding: 20px;
+  animation: fade 0.22s ease;
+}
+.overlay[hidden] { display: none; }
+@keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+
+.card {
+  width: min(360px, 92vw);
+  /* The how-to legend is taller than a short phone, so cards scroll rather
+     than run off the bottom. */
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: linear-gradient(180deg, var(--night-soft), var(--night-mid));
+  border: 1px solid var(--panel-edge);
+  border-radius: 22px;
+  padding: 26px 22px 20px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  animation: pop 0.26s cubic-bezier(0.2, 1.2, 0.4, 1);
+}
+.card-wide { width: min(440px, 92vw); text-align: left; }
+@keyframes pop { from { transform: scale(0.9) translateY(10px); opacity: 0 } to { transform: none; opacity: 1 } }
+
+.card h3 {
+  margin: 0 0 8px;
+  font-family: "Pixelify Sans", monospace;
+  font-size: 26px;
+  color: var(--moon);
+}
+.muted { color: var(--ink-dim); font-size: 14px; line-height: 1.6; margin: 0 0 14px; }
+.small { font-size: 12.5px; }
+.card-actions { display: flex; gap: 10px; margin-top: 18px; }
+.card-actions .btn { flex: 1; }
+
+.win-stars { font-size: 30px; letter-spacing: 6px; margin-bottom: 4px; min-height: 36px; color: var(--accent-warm); }
+
+.legend { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 10px; }
+.legend li { display: flex; align-items: center; gap: 12px; font-size: 13.5px; line-height: 1.45; }
+.legend canvas { width: 38px; height: 38px; flex: none; }
+.legend b { color: var(--ink); font-weight: 700; display: block; }
+.legend span { color: var(--ink-dim); }
+
+@media (max-height: 680px) {
+  .slot { width: 50px; height: 50px; }
+  .slot canvas { width: 36px; height: 36px; }
+  .tagline { margin-bottom: 20px; }
+}

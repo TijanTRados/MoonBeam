@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="sky" cx="50%" cy="34%" r="78%">
+      <stop offset="0%" stop-color="#231a4d"/>
+      <stop offset="62%" stop-color="#1a1438"/>
+      <stop offset="100%" stop-color="#120e26"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffe29a" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#ffe29a" stop-opacity="0"/>
+    </radialGradient>
+    <mask id="crescent">
+      <rect width="512" height="512" fill="black"/>
+      <circle cx="196" cy="168" r="74" fill="white"/>
+      <circle cx="230" cy="152" r="68" fill="black"/>
+    </mask>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#sky)"/>
+  <circle cx="196" cy="168" r="150" fill="url(#halo)"/>
+  <rect width="512" height="512" mask="url(#crescent)" fill="#ffe6a8"/>
+
+  <!-- the beam: down, then bent right by a mirror, into the ring -->
+  <g stroke-linecap="round" fill="none">
+    <path d="M196 250 L196 340 L330 340" stroke="#fff6e0" stroke-opacity="0.18" stroke-width="34"/>
+    <path d="M196 250 L196 340 L330 340" stroke="#fff6e0" stroke-width="9"/>
+    <path d="M172 364 L220 316" stroke="#e6ddff" stroke-width="17"/>
+    <circle cx="368" cy="340" r="30" stroke="#7cc4ff" stroke-width="15"/>
+  </g>
+
+  <path d="M300 196 l9 24 24 9 -24 9 -9 24 -9-24 -24-9 24-9z" fill="#ffd97d"/>
+</svg>

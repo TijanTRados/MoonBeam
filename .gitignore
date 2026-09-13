@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+.vite/
+
+# Capacitor native projects are generated; regenerate with `npx cap add android`
+android/
+ios/

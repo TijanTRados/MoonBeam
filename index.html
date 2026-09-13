@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#120e26" />
+<meta name="description" content="MoonBeam — a cozy lo-fi puzzle about routing moonlight through mirrors, prisms and stars." />
+<title>MoonBeam</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet" />
+<link rel="icon" type="image/svg+xml" href="./icon.svg" />
+<link rel="apple-touch-icon" href="./icon.svg" />
+<link rel="manifest" href="./manifest.webmanifest" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ---------------------------------------------------------- title -->
+  <section id="screen-title" class="screen is-active">
+    <div class="title-art" aria-hidden="true">
+      <canvas id="title-canvas"></canvas>
+    </div>
+    <h1 class="logo">Moon<span>Beam</span></h1>
+    <p class="tagline">The moon is shining.<br />Build the path.</p>
+    <nav class="menu">
+      <button class="btn btn-primary" data-action="play">Continue</button>
+      <button class="btn" data-action="nights">Nights</button>
+      <button class="btn" data-action="endless">Endless</button>
+      <button class="btn btn-quiet" data-action="howto">How to play</button>
+    </nav>
+    <p class="credit">A 2015 thesis project, rebuilt.<br />Tijan Tomislav Radoš</p>
+  </section>
+
+  <!-- ---------------------------------------------------------- nights -->
+  <section id="screen-nights" class="screen">
+    <header class="bar">
+      <button class="icon-btn" data-action="home" aria-label="Back">‹</button>
+      <h2>Nights</h2>
+      <span class="bar-spacer"></span>
+    </header>
+    <div id="night-grid" class="night-grid"></div>
+  </section>
+
+  <!-- ---------------------------------------------------------- game -->
+  <section id="screen-game" class="screen">
+    <header class="bar">
+      <button class="icon-btn" data-action="home" aria-label="Back">‹</button>
+      <div class="bar-title">
+        <h2 id="level-name">Night 1</h2>
+        <div id="level-meta" class="meta"></div>
+      </div>
+      <button class="icon-btn" data-action="hint" aria-label="Hint">?</button>
+    </header>
+
+    <div class="board-wrap">
+      <canvas id="board" aria-label="Puzzle grid"></canvas>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <div id="tray" class="tray" role="toolbar" aria-label="Pieces"></div>
+
+    <div class="controls">
+      <button class="btn btn-ghost" data-action="reset">Clear</button>
+      <button class="btn btn-primary btn-run" data-action="run">Shine</button>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------- win -->
+  <div id="win" class="overlay" hidden>
+    <div class="card">
+      <div class="win-stars" id="win-stars"></div>
+      <h3 id="win-title">Solved</h3>
+      <p id="win-sub" class="muted"></p>
+      <div class="card-actions">
+        <button class="btn btn-ghost" data-action="replay">Again</button>
+        <button class="btn btn-primary" data-action="next">Next night</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- howto -->
+  <div id="howto" class="overlay" hidden>
+    <div class="card card-wide">
+      <h3>How to play</h3>
+      <p class="muted">
+        The moon drops a beam of light into the grid. Place pieces from the tray
+        so the light reaches every ring — and passes through every star on the way.
+      </p>
+      <ul id="howto-list" class="legend"></ul>
+      <p class="muted small">
+        Tap a piece in the tray, then tap a cell to place it. Tap a mirror you
+        placed to flip it. Tap anything else you placed to pick it back up.
+        Rings must be hit by <em>exactly</em> their colour — no more, no less.
+      </p>
+      <div class="card-actions">
+        <button class="btn btn-primary" data-action="close-howto">Got it</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
