@@ -19,10 +19,10 @@ for (const target of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
     for (const t of l.tiles) {
       if (t.kind === "receptor") { recs++; cols.add(t.mask ?? 7); }
       if (t.kind === "star") stars++;
-      if (t.kind === "splitter" || t.kind === "prism") branch++;
+      if (t.kind === "splitter" || t.kind === "crystal") branch++;
       if (t.track && t.track.length > 1) moving++;
     }
-    for (const it of l.inventory) if (it.kind === "splitter" || it.kind === "prism") branch += it.count;
+    for (const it of l.inventory) if (it.kind === "splitter" || it.kind === "crystal") branch += it.count;
     const tray = l.inventory.reduce((s, it) => s + it.count, 0);
     rows.push({
       pieces: l.par ?? 0, branch, cols: cols.size, recs, stars,

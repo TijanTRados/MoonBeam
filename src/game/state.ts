@@ -15,6 +15,8 @@ export interface TraySlot {
   key: string;
   kind: TileKind;
   mask?: Light;
+  /** For `tint`: the colour it converts from. */
+  from?: Light;
   total: number;
   used: number;
 }
@@ -45,7 +47,7 @@ export class Game {
     this.tray = [];
     const seen = new Map<string, TraySlot>();
     for (const it of level.inventory) {
-      const key = poolKey(it.kind, it.mask);
+      const key = poolKey(it.kind, it.mask, it.from);
       const e = seen.get(key);
       if (e) { e.total += it.count; continue; }
       const slot: TraySlot = {
@@ -54,6 +56,7 @@ export class Game {
         // rotates it in place after dropping it.
         kind: key === "mirror" ? "mirrorB" : it.kind,
         mask: it.mask,
+        from: it.from,
         total: it.count,
         used: 0,
       };
@@ -77,8 +80,8 @@ export class Game {
     this.hint.clear();
   }
 
-  slotFor(kind: TileKind, mask?: Light): TraySlot | undefined {
-    const key = poolKey(kind, mask);
+  slotFor(kind: TileKind, mask?: Light, from?: Light): TraySlot | undefined {
+    const key = poolKey(kind, mask, from);
     return this.tray.find((s) => s.key === key);
   }
 
@@ -90,9 +93,13 @@ export class Game {
    * A tap on a cell.
    *
    * Empty cell  -> place the selected piece.
-   * Your mirror -> flip its orientation (free: both orientations share a pool).
+   * Your mirror -> flip it; a second tap takes it back.
    * Your piece  -> pick it back up.
    * Level piece -> nothing; the level's own furniture is fixed.
+   *
+   * Mirrors cycle "\" -> "/" -> gone rather than flipping forever. Flipping
+   * forever left no way to pick a mirror back up: every tap just turned it
+   * round again, and the only escape was clearing the whole board.
    */
   tap(i: number): "placed" | "rotated" | "removed" | "none" {
     if (this.phase === "running") return "none";
@@ -100,9 +107,8 @@ export class Game {
     const t = this.board[i];
 
     if (t.placed) {
-      if (t.kind === "mirrorB") { this.board[i] = { ...t, kind: "mirrorA" }; return "rotated"; }
-      if (t.kind === "mirrorA") { this.board[i] = { ...t, kind: "mirrorB" }; return "rotated"; }
-      const slot = this.slotFor(t.kind, t.mask);
+      if (t.kind === "mirrorB") { this.board[i] = { ...t, kind: "mirrorA" }; this.invalidate(); return "rotated"; }
+      const slot = this.slotFor(t.kind, t.mask, t.from);
       if (slot) slot.used--;
       this.board[i] = { kind: "empty" };
       this.invalidate();
@@ -119,7 +125,7 @@ export class Game {
       return this.tap(i);
     }
 
-    this.board[i] = { kind: slot.kind, mask: slot.mask, placed: true };
+    this.board[i] = { kind: slot.kind, mask: slot.mask, from: slot.from, placed: true };
     slot.used++;
     this.invalidate();
     return "placed";

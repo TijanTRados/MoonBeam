@@ -42,12 +42,14 @@ below is the thesis's physics, checked against it in `test/engine.test.ts`.
 
 | 2015 | Now | Why |
 |---|---|---|
-| Three fixed colours (white / red / blue) | Additive **RGB channel mask** | Filters *subtract* channels and prisms *separate* them, so colour becomes something you route rather than a label you match |
+| Three fixed colours (white / red / blue) | Additive **RGB channel mask** | Colour becomes something you route rather than a label you match |
 | Receptor accepts its colour | Receptor needs an **exact** match | Over-lighting now fails, which makes filters and careful routing matter |
 | — | Receptors **accumulate** | Two beams can combine into a colour neither one carried |
 | Beam is a travelling ball, one cell per tick | Instant simulation, **animated** reveal | The puzzle resolves deterministically; the travelling-ball reveal is kept, because it was the best part |
 | Nine hand-built levels | **Generated, verified, rated** | See below |
-| — | Stars, portals, moving shutters | Depth: collection, non-local routing, and timing |
+| — | Stars, portals, black holes, moving shutters | Depth: collection, non-local routing, one-way jumps, and timing |
+| "Prism", splitting into 3 beams | **Crystal** | A real prism disperses a continuous spectrum by refraction; it does not fire three beams at right angles. The name invited an argument the game cannot win, so the object is now openly invented |
+| Filter *subtracts* channels | **Tint** *converts* one colour to another | Subtractive filters killed beams silently and were hard to reason about. A tint states plainly "red becomes blue", and never destroys light |
 | Nine Java `Activity` classes | One pure TS engine | The generator needs to run the simulation thousands of times a second |
 
 ---
@@ -126,6 +128,26 @@ in the difficulty model, "shortest found" is not good enough; it has to be the
 genuine minimum. Trying depth 1, then 2, and stopping at the first depth that
 yields anything makes par correct by construction.
 
+### Teaching order
+
+Difficulty is not only how much there is to do — it is which ideas are in play.
+Some are gated rather than scaled, because meeting them cold is not a challenge,
+it is a bug report:
+
+| Idea | First appears |
+|---|---|
+| Splitters | difficulty 3 |
+| The crystal, and colour | difficulty 4 |
+| Tints | difficulty 5 |
+| Jumps — portals and black holes | difficulty 6 |
+| Rings needing **two converging beams** | difficulty 6 |
+| Moving shutters, and timing | difficulty 7 |
+
+That last one was added after a playtest report that "night 7 is broken, the red
+receptor never triggers". The level was fine; the ring was magenta, needing red
+*and* blue to arrive together, and nothing had taught that. Holding it back —
+and drawing the required channels as dots inside the ring — was the fix.
+
 ### The difficulty model
 
 Difficulty is a **linear model fitted to generator features**, not hand-picked
@@ -174,12 +196,13 @@ Four directions, and light is an RGB bitmask (white = R|G|B).
 | **Mirror** `\` | Down↔Right, Up↔Left. *(the thesis's mirror1)* |
 | **Mirror** `/` | Down↔Left, Up↔Right. |
 | **Splitter** ◇ | Emits to **both sides**, never straight on. |
-| **Prism** △ | White in → red one way, blue the other, green straight through. Already-separated light passes untouched. |
-| **Filter** ▣ | Passes only its channels. Light with nothing left dies. |
+| **Crystal** △ | Moonlight in → red one way, blue the other, green straight through. Already-separated light passes untouched. |
+| **Tint** ▣ | Converts one colour into another. Light it does not match passes through unharmed — a tint never destroys light. |
 | **Wall** ▓ | Absorbs. May ride a track, moving one cell per tick. |
 | **Star** ✦ | Transparent. Collect every one to finish. |
-| **Ring** ◎ | The goal. Needs an **exact** colour match; beams accumulate additively. |
-| **Portal** ◉ | Teleports, preserving direction. |
+| **Ring** ◎ | The goal. Needs an **exact** colour match; beams accumulate additively, and a ring needing two channels shows them as dots inside it. |
+| **Portal** ◉ | Teleports, preserving direction. Works both ways. |
+| **Black hole** ● / **White hole** ○ | Light falls into the black hole and out of its white hole, still travelling the same way. **One-way** — that asymmetry is why both exist. |
 
 Two properties fall out of this that are worth knowing:
 

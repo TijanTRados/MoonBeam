@@ -65,12 +65,34 @@ export type TileKind =
   | "mirrorB"
   /** Diamond: splits an incoming beam into the two perpendicular directions. */
   | "splitter"
-  /** Prism: separates white into R / G / B on three sides. Coloured light passes through. */
-  | "prism"
-  /** Subtractive filter: passes only the channels in `mask`, dies if nothing survives. */
-  | "filter"
+  /**
+   * Crystal: separates moonlight into its three colours, one per side.
+   *
+   * Deliberately *not* called a prism. A real prism disperses light into a
+   * continuous spectrum by wavelength-dependent refraction — it does not emit
+   * three discrete beams at right angles to each other. Naming this a prism
+   * invited a physics argument the game cannot win, so it is a crystal: a
+   * made-up object that obeys the game's rules and claims nothing about optics.
+   */
+  | "crystal"
+  /**
+   * Tint: turns one colour into another.
+   *
+   * `to` is the colour that comes out. If `from` is set, only light of exactly
+   * that colour is converted and everything else passes through untouched; if
+   * `from` is unset, any light that enters leaves as `to`.
+   */
+  | "tint"
   /** Paired teleport. Beam exits the twin portal with the same direction. */
   | "portal"
+  /**
+   * Black hole: swallows light, which falls out of the paired white hole still
+   * travelling the same way. One-way, unlike a portal — that asymmetry is the
+   * whole point of having both.
+   */
+  | "blackhole"
+  /** Where a black hole's light comes back out. Otherwise transparent. */
+  | "whitehole"
   /** Collectible. Light passes straight through; lighting it banks it permanently. */
   | "star"
   /** Goal. Must be hit by light matching `mask` exactly. */
@@ -78,9 +100,11 @@ export type TileKind =
 
 export interface Tile {
   kind: TileKind;
-  /** For `filter` and `receptor`: which channels. */
+  /** For `receptor`: the colour it demands. For `tint`: the colour it emits. */
   mask?: Light;
-  /** For `portal`: pairing id. Exactly two portals share an id. */
+  /** For `tint`: only convert light of exactly this colour. Unset means "any". */
+  from?: Light;
+  /** Pairing id for `portal`, and for `blackhole`/`whitehole`. */
   pair?: number;
   /**
    * Set on tiles the player placed this session, so we can render them
@@ -99,6 +123,8 @@ export interface Tile {
 export interface InventoryItem {
   kind: TileKind;
   mask?: Light;
+  /** For `tint`: the colour it converts from. */
+  from?: Light;
   count: number;
 }
 
@@ -130,9 +156,24 @@ export interface Level {
    * level around it), which is what lets the game offer a hint without
    * having to solve anything at runtime.
    */
-  solution?: { i: number; kind: TileKind; mask?: Light }[];
+  solution?: { i: number; kind: TileKind; mask?: Light; from?: Light }[];
 }
 
 export const idx = (l: { w: number }, x: number, y: number) => y * l.w + x;
 export const inBounds = (l: { w: number; h: number }, x: number, y: number) =>
   x >= 0 && y >= 0 && x < l.w && y < l.h;
+
+/**
+ * Rebuild a tile from a recorded placement.
+ *
+ * Always go through this rather than spreading the fields by hand. Tiles have
+ * grown optional fields over time (`mask`, then `from`), and every hand-written
+ * `{ kind, mask }` silently dropped the newer ones — which turned a targeted
+ * tint into an untargeted one and made verified solutions look broken.
+ */
+export function tileFrom(
+  p: { kind: TileKind; mask?: Light; from?: Light },
+  placed = false,
+): Tile {
+  return { kind: p.kind, mask: p.mask, from: p.from, ...(placed ? { placed: true } : {}) };
+}

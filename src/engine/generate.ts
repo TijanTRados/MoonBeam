@@ -33,7 +33,7 @@
  */
 import {
   Chan, Dir, DELTA, InventoryItem, Level, Light, Tile, TileKind, WHITE,
-  inBounds, turnCCW, turnCW,
+  inBounds, tileFrom, turnCCW, turnCW,
 } from "./types";
 import { evaluate, simulate } from "./simulate";
 import { analyse, solve, scoreDifficulty, poolKey, Placement, SolveResult } from "./solver";
@@ -71,10 +71,10 @@ function budgetFor(d: number) {
     pieces: Math.max(2, Math.min(7, Math.round(1.4 + d * 0.62))),
     /** Chance a step places a beam-splitting piece. */
     splitChance: d < 3 ? 0 : Math.min(0.42, (d - 2) * 0.09),
-    /** Chance of a prism, which introduces colour separation. */
-    prismChance: d < 4 ? 0 : Math.min(0.34, (d - 3) * 0.085),
-    /** Chance of a subtractive filter. */
-    filterChance: d < 5 ? 0 : Math.min(0.3, (d - 4) * 0.08),
+    /** Chance of a crystal, which introduces colour separation. */
+    crystalChance: d < 4 ? 0 : Math.min(0.34, (d - 3) * 0.085),
+    /** Chance of a tint, which converts one colour into another. */
+    tintChance: d < 5 ? 0 : Math.min(0.3, (d - 4) * 0.08),
     /** Collectible stars to scatter along the solution. */
     stars: d < 3 ? 0 : Math.min(3, Math.floor((d - 1) / 2.6)),
     /** Decoy pieces added to the tray beyond what the solution needs. */
@@ -83,8 +83,12 @@ function budgetFor(d: number) {
     walls: Math.min(7, Math.floor(d * 0.8)),
     /** Whether to attempt a moving shutter (adds the timing dimension). */
     moving: d >= 7,
-    /** Chance the walk drops a portal pair, making routing non-local. */
-    portalChance: d < 8 ? 0 : Math.min(0.09, (d - 7) * 0.03),
+    /**
+     * Chance the walk drops a jump — a portal pair or a black hole feeding a
+     * white hole. Either way routing stops being local, which is a big enough
+     * idea to be worth meeting well before the top of the range.
+     */
+    jumpChance: d < 6 ? 0 : Math.min(0.09, (d - 5) * 0.025),
   };
 }
 
@@ -100,7 +104,7 @@ interface Branch { x: number; y: number; dir: Dir; light: Light; steps: number }
 function construct(r: Rand, w: number, h: number, d: number) {
   const b = budgetFor(d);
   const tiles: Tile[] = Array.from({ length: w * h }, () => ({ kind: "empty" as const }));
-  const solutionCells: { i: number; kind: TileKind; mask?: Light }[] = [];
+  const solutionCells: { i: number; kind: TileKind; mask?: Light; from?: Light }[] = [];
   const pathCells: number[] = [];
 
   // The moon sits outside the grid, as in the original, and fires inward.
@@ -110,7 +114,7 @@ function construct(r: Rand, w: number, h: number, d: number) {
   const queue: Branch[] = [{ ...emitter, steps: 0 }];
   const terminals: { x: number; y: number; light: Light }[] = [];
   let placedCount = 0;
-  let portalUsed = false;
+  let jumpUsed = false;
   const guard = new Set<string>();
 
   while (queue.length) {
@@ -136,13 +140,14 @@ function construct(r: Rand, w: number, h: number, d: number) {
       pathCells.push(i);
       const cell = tiles[i];
 
-      // Portals are resolved here rather than in `applyExisting`, because where
-      // the light re-emerges depends on the twin's position — a property of the
-      // board, not of the tile. They are always level furniture, never tray
+      // Jumps are resolved here rather than in `applyExisting`, because where
+      // the light re-emerges depends on the partner's position — a property of
+      // the board, not of the tile. They are always level furniture, never tray
       // pieces: the puzzle is routing light *through* them, not placing them.
-      if (cell.kind === "portal") {
+      if (cell.kind === "portal" || cell.kind === "blackhole") {
+        const want = cell.kind === "portal" ? "portal" : "whitehole";
         const twin = tiles.findIndex(
-          (t, j) => j !== i && t.kind === "portal" && t.pair === cell.pair,
+          (t, j) => j !== i && t.kind === want && t.pair === cell.pair,
         );
         if (twin < 0) break;
         x = twin % w;
@@ -154,7 +159,7 @@ function construct(r: Rand, w: number, h: number, d: number) {
         continue;
       }
 
-      if (cell.kind === "empty" && !portalUsed && steps > 1 && chance(r, b.portalChance)) {
+      if (cell.kind === "empty" && !jumpUsed && steps > 1 && chance(r, b.jumpChance)) {
         // Drop a pair and jump. Keeping the exit well away from the entrance
         // stops the jump reading as a wobble rather than a teleport.
         const free: number[] = [];
@@ -165,9 +170,17 @@ function construct(r: Rand, w: number, h: number, d: number) {
         }
         if (free.length) {
           const twin = pick(r, free);
-          tiles[i] = { kind: "portal", pair: 1 };
-          tiles[twin] = { kind: "portal", pair: 1 };
-          portalUsed = true;
+          // A portal pair works both ways; a black hole only ever feeds its
+          // white hole. Same jump for this forward walk, different puzzle for
+          // the player, who cannot route anything back through the exit.
+          if (chance(r, 0.5)) {
+            tiles[i] = { kind: "portal", pair: 1 };
+            tiles[twin] = { kind: "portal", pair: 1 };
+          } else {
+            tiles[i] = { kind: "blackhole", pair: 1 };
+            tiles[twin] = { kind: "whitehole", pair: 1 };
+          }
+          jumpUsed = true;
           x = twin % w;
           y = Math.floor(twin / w);
           pathCells.push(twin);
@@ -194,8 +207,8 @@ function construct(r: Rand, w: number, h: number, d: number) {
       ) {
         // Drop a piece and bend the walk around it.
         const choice = choosePiece(r, b, light);
-        tiles[i] = { kind: choice.kind, mask: choice.mask };
-        solutionCells.push({ i, kind: choice.kind, mask: choice.mask });
+        tiles[i] = { kind: choice.kind, mask: choice.mask, from: choice.from };
+        solutionCells.push({ i, kind: choice.kind, mask: choice.mask, from: choice.from });
         placedCount++;
 
         const next = applyExisting(tiles[i], dir, light);
@@ -226,16 +239,19 @@ function applyExisting(t: Tile, dir: Dir, light: Light): { dir: Dir; light: Ligh
                    : dir === Dir.Up ? Dir.Left : Dir.Up, light }];
     case "splitter":
       return [{ dir: turnCW(dir), light }, { dir: turnCCW(dir), light }];
-    case "prism":
+    case "crystal":
       return light === WHITE
         ? [{ dir: turnCW(dir), light: Chan.R },
            { dir, light: Chan.G },
            { dir: turnCCW(dir), light: Chan.B }]
         : [{ dir, light }];
-    case "filter": {
-      const l = light & (t.mask ?? WHITE);
-      return l ? [{ dir, light: l }] : [];
-    }
+    case "tint":
+      return [{
+        dir,
+        light: t.from === undefined || light === t.from ? (t.mask ?? light) : light,
+      }];
+    case "whitehole":
+      return [{ dir, light }];
     case "wall":
       return [];
     default:
@@ -243,17 +259,20 @@ function applyExisting(t: Tile, dir: Dir, light: Light): { dir: Dir; light: Ligh
   }
 }
 
-function choosePiece(r: Rand, b: ReturnType<typeof budgetFor>, light: Light) {
+function choosePiece(
+  r: Rand,
+  b: ReturnType<typeof budgetFor>,
+  light: Light,
+): { kind: TileKind; mask?: Light; from?: Light } {
   const roll = r();
-  if (light === WHITE && roll < b.prismChance) return { kind: "prism" as TileKind };
-  if (roll < b.prismChance + b.splitChance) return { kind: "splitter" as TileKind };
-  if (roll < b.prismChance + b.splitChance + b.filterChance) {
-    // Only offer a filter that actually passes something, or the branch dies.
-    const keep = [Chan.R, Chan.G, Chan.B].filter((c) => light & c);
-    if (keep.length > 1) {
-      const mask = pick(r, keep) | (chance(r, 0.4) ? pick(r, keep) : 0);
-      if (mask !== light) return { kind: "filter" as TileKind, mask };
-    }
+  if (light === WHITE && roll < b.crystalChance) return { kind: "crystal" as TileKind };
+  if (roll < b.crystalChance + b.splitChance) return { kind: "splitter" as TileKind };
+  if (roll < b.crystalChance + b.splitChance + b.tintChance) {
+    // A tint converts rather than subtracts, so it can never kill the branch —
+    // it just has to actually change something to be worth placing.
+    const others = ([Chan.R, Chan.G, Chan.B, WHITE] as Light[]).filter((c) => c !== light);
+    const to = pick(r, others);
+    return { kind: "tint" as TileKind, mask: to, from: light };
   }
   return { kind: pick(r, ["mirrorA", "mirrorB"] as TileKind[]) };
 }
@@ -361,11 +380,11 @@ function excavate(
   // Both mirror orientations share one tray slot — the player is given "three
   // mirrors" and picks each orientation when placing, so the tray stays small.
   const inv = new Map<string, InventoryItem>();
-  const add = (kind: TileKind, mask?: Light) => {
-    const k = poolKey(kind, mask);
+  const add = (kind: TileKind, mask?: Light, from?: Light) => {
+    const k = poolKey(kind, mask, from);
     const e = inv.get(k);
     if (e) e.count++;
-    else inv.set(k, { kind: k === "mirror" ? "mirrorB" : kind, mask, count: 1 });
+    else inv.set(k, { kind: k === "mirror" ? "mirrorB" : kind, mask, from, count: 1 });
   };
   for (const p of built.solutionCells) {
     // Only lift a cell that still holds the exact piece we recorded. A later
@@ -373,9 +392,9 @@ function excavate(
     // clearing that would delete level furniture — which is how a portal pair
     // once lost half of itself.
     const t = tiles[p.i];
-    if (t.kind !== p.kind || t.mask !== p.mask) continue;
+    if (t.kind !== p.kind || t.mask !== p.mask || t.from !== p.from) continue;
     tiles[p.i] = { kind: "empty" };
-    add(p.kind, p.mask);
+    add(p.kind, p.mask, p.from);
   }
   if (inv.size === 0) return null;
 
@@ -434,7 +453,7 @@ function tighten(level: Level, known: Placement[], r: Rand, want: number): Level
       probe.tiles[i] = { kind: "wall" };
 
       const replay: Level = { ...probe, tiles: probe.tiles.map((t) => ({ ...t })), inventory: [] };
-      for (const p of known) replay.tiles[p.i] = { kind: p.kind, mask: p.mask };
+      for (const p of known) replay.tiles[p.i] = tileFrom(p);
       if (evaluate(replay).won) { cur = probe; placed = true; }
     }
     if (!placed) break;
@@ -474,7 +493,7 @@ function tryAddMovingPart(level: Level, r: Rand, known: Placement[]): Level {
     // Verified the same cheap way: lay the known solution back down and check
     // that some tick in the movement cycle still lights every receptor at once.
     const replay: Level = { ...probe, tiles: probe.tiles.map((t) => ({ ...t })), inventory: [] };
-    for (const p of known) replay.tiles[p.i] = { kind: p.kind, mask: p.mask };
+    for (const p of known) replay.tiles[p.i] = tileFrom(p);
     if (evaluate(replay).won) return probe;
   }
   return level;
@@ -522,7 +541,7 @@ export function generateLevel(seed: number, opts: GenOptions = {}): GenResult {
     // solution the player is being asked to find; anything the receptor pass
     // overwrote is now level furniture, not a tray piece.
     const known = built.solutionCells.filter((p) => level.tiles[p.i].kind === "empty");
-    for (const p of known) replay.tiles[p.i] = { kind: p.kind, mask: p.mask };
+    for (const p of known) replay.tiles[p.i] = tileFrom(p);
     if (known.length === 0) continue;
     if (!evaluate(replay).won) continue;
 

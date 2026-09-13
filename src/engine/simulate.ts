@@ -61,6 +61,41 @@ export function resolveTiles(level: Level, tick: number): Tile[] {
 
 interface Ray { x: number; y: number; dir: Dir; light: Light; order: number }
 
+/**
+ * Where each jumping tile sends light.
+ *
+ * Portals map both ways within a pair. Black holes map one way onto the white
+ * hole sharing their id, and never back.
+ */
+function buildLinks(tiles: Tile[]): Map<number, number> {
+  const links = new Map<number, number>();
+  const portals = new Map<number, number[]>();
+  const blacks = new Map<number, number[]>();
+  const whites = new Map<number, number>();
+
+  for (let j = 0; j < tiles.length; j++) {
+    const p = tiles[j].pair ?? 0;
+    if (tiles[j].kind === "portal") {
+      const xs = portals.get(p);
+      if (xs) xs.push(j); else portals.set(p, [j]);
+    } else if (tiles[j].kind === "blackhole") {
+      const xs = blacks.get(p);
+      if (xs) xs.push(j); else blacks.set(p, [j]);
+    } else if (tiles[j].kind === "whitehole") {
+      whites.set(p, j);
+    }
+  }
+
+  for (const js of portals.values()) {
+    if (js.length === 2) { links.set(js[0], js[1]); links.set(js[1], js[0]); }
+  }
+  for (const [p, js] of blacks) {
+    const exit = whites.get(p);
+    if (exit !== undefined) for (const j of js) links.set(j, exit);
+  }
+  return links;
+}
+
 export function simulate(level: Level, tick = 0): SimResult {
   const tiles = resolveTiles(level, tick);
   const segments: Segment[] = [];
@@ -76,8 +111,8 @@ export function simulate(level: Level, tick = 0): SimResult {
   const queue: Ray[] = [];
   for (const e of level.emitters) queue.push({ x: e.x, y: e.y, dir: e.dir, light: e.light, order: 0 });
 
-  // Portal twins are looked up per hop, so resolve the pairing once up front.
-  let portalOf: Map<number, number> | null = null;
+  // Jump destinations are looked up per hop, so resolve the pairings once.
+  let linkOf: Map<number, number> | null = null;
 
   let steps = 0;
   let depth = 0;
@@ -130,7 +165,7 @@ export function simulate(level: Level, tick = 0): SimResult {
         emit(turnCCW(dir), light);
         break;
 
-      case "prism":
+      case "crystal":
         if (light === WHITE) {
           // Separation: red bends one way, blue the other, green carries straight.
           emit(turnCW(dir), 1);
@@ -141,25 +176,21 @@ export function simulate(level: Level, tick = 0): SimResult {
         }
         break;
 
-      case "filter":
-        emit(dir, light & (tile.mask ?? WHITE));
+      case "tint":
+        // Conversion, not subtraction. Light that matches `from` (or any light,
+        // when `from` is unset) leaves as `mask`; anything else is unaffected.
+        // Nothing dies here, which makes tints safe to experiment with.
+        emit(dir, tile.from === undefined || light === tile.from ? (tile.mask ?? light) : light);
         break;
 
-      case "portal": {
-        if (!portalOf) {
-          portalOf = new Map();
-          const byPair = new Map<number, number[]>();
-          for (let j = 0; j < tiles.length; j++) {
-            if (tiles[j].kind !== "portal") continue;
-            const p = tiles[j].pair ?? 0;
-            (byPair.get(p) ?? byPair.set(p, []).get(p)!).push(j);
-          }
-          for (const js of byPair.values()) {
-            if (js.length === 2) { portalOf.set(js[0], js[1]); portalOf.set(js[1], js[0]); }
-          }
-        }
-        const twin = portalOf.get(i) ?? -1;
-        if (twin < 0) { emit(dir, light); break; }
+      // Portals pair symmetrically; a black hole only ever sends light *to* its
+      // white hole. Both resolve to "come out over there, still travelling the
+      // same way", so they share one jump.
+      case "portal":
+      case "blackhole": {
+        if (!linkOf) linkOf = buildLinks(tiles);
+        const twin = linkOf.get(i) ?? -1;
+        if (twin < 0) { if (tile.kind === "portal") emit(dir, light); break; }
         const tx = twin % level.w, ty = Math.floor(twin / level.w);
         segments.push({ x0: x, y0: y, x1: tx, y1: ty, light, order: ray.order + 1, warp: true });
         const dv = DELTA[dir];
@@ -168,6 +199,11 @@ export function simulate(level: Level, tick = 0): SimResult {
         if (inBounds(level, nx, ny)) queue.push({ x: nx, y: ny, dir, light, order: ray.order + 2 });
         break;
       }
+
+      // A white hole is only an exit. Light that wanders into one just passes.
+      case "whitehole":
+        emit(dir, light);
+        break;
 
       case "star":
         starsLit.add(i);

@@ -8,7 +8,7 @@
  *   npx tsx tools/gen-report.ts 40         # 40 nights
  *   npx tsx tools/gen-report.ts 12 --draw  # 12 nights, with ASCII boards
  */
-import { Level } from "../src/engine/types";
+import { Level, tileFrom } from "../src/engine/types";
 import { evaluate } from "../src/engine/simulate";
 import { generateCampaignLevel, campaignDifficulty } from "../src/engine/generate";
 
@@ -18,7 +18,8 @@ const drawBoards = args.includes("--draw");
 
 const GLYPH: Record<string, string> = {
   empty: "·", wall: "▓", mirrorA: "/", mirrorB: "\\", splitter: "◇",
-  prism: "△", filter: "▣", star: "✦", receptor: "◎", portal: "◉",
+  crystal: "△", tint: "▣", star: "✦", receptor: "◎", portal: "◉",
+  blackhole: "●", whitehole: "○",
 };
 
 function render(l: Level): string[] {
@@ -58,7 +59,7 @@ for (let n = 1; n <= count; n++) {
 
   // Verify the shipped solution really wins.
   const board: Level = { ...l, tiles: l.tiles.map((t) => ({ ...t })), inventory: [] };
-  for (const p of l.solution ?? []) board.tiles[p.i] = { kind: p.kind, mask: p.mask };
+  for (const p of l.solution ?? []) board.tiles[p.i] = tileFrom(p);
   const ok = (l.solution?.length ?? 0) > 0 && evaluate(board).won;
   if (!ok) bad++;
   scored.push(l.difficulty ?? 0);

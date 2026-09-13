@@ -4,11 +4,12 @@
  * The board is canvas; everything else is DOM, so buttons stay real buttons.
  */
 import "./style.css";
-import { Chan, Level, Light, TileKind, WHITE } from "./engine/types";
+import { Chan, Level, Light, TileKind, WHITE, tileFrom } from "./engine/types";
 import { generateCampaignLevel, campaignDifficulty, generateLevel } from "./engine/generate";
 import { simulate } from "./engine/simulate";
 import { Game, loadProgress, saveProgress, Progress } from "./game/state";
 import { cellAt, computeLayout, draw, drawIcon, ViewState } from "./render/renderer";
+import { clearFx, spawnFx } from "./render/fx";
 import { LIGHT_LABEL } from "./render/theme";
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -62,7 +63,12 @@ function frame(now: number) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     if (game.phase === "running") {
+      const before = new Set(game.starsLit);
       const settled = game.advance(dt);
+      // A star sparks the moment the light actually gets to it.
+      for (const s of game.starsLit) {
+        if (!before.has(s)) spawnFx(s, "star", now / 1000);
+      }
       if (settled) onSettled();
     }
     winGlow = game.phase === "won"
@@ -106,7 +112,7 @@ const titleLevel: Level = {
 };
 const T = (x: number, y: number, t: Parameters<typeof Object>[0]) => { titleLevel.tiles[y * TW + x] = t; };
 T(2, 2, { kind: "mirrorB" });
-T(6, 2, { kind: "prism" });
+T(6, 2, { kind: "crystal" });
 T(6, 6, { kind: "splitter" });
 T(4, 2, { kind: "star" });
 T(2, 6, { kind: "mirrorA" });
@@ -154,6 +160,8 @@ canvas.addEventListener("pointerdown", (e) => {
   const r = game.tap(i);
   if (r !== "none") {
     buzz(r === "removed" ? 8 : 12);
+    spawnFx(i, r === "placed" ? "place" : r === "rotated" ? "rotate" : "remove",
+            performance.now() / 1000);
     renderTray();
   }
 });
@@ -172,7 +180,7 @@ function renderTray() {
     const left = slot.total - slot.used;
     const b = document.createElement("button");
     b.className = `slot${k === game!.selected ? " selected" : ""}${left === 0 ? " empty" : ""}`;
-    b.setAttribute("aria-label", `${pieceName(slot.kind, slot.mask)}, ${left} left`);
+    b.setAttribute("aria-label", `${pieceName(slot.kind, slot.mask, slot.from)}, ${left} left`);
     b.setAttribute("aria-pressed", String(k === game!.selected));
 
     const c = document.createElement("canvas");
@@ -180,7 +188,7 @@ function renderTray() {
     c.width = c.height = Math.round(42 * dpr);
     const cc = c.getContext("2d")!;
     cc.scale(dpr, dpr);
-    drawIcon(cc, 42, slot.kind, slot.mask);
+    drawIcon(cc, 42, slot.kind, slot.mask, slot.from);
     b.appendChild(c);
 
     const n = document.createElement("span");
@@ -197,13 +205,17 @@ function renderTray() {
   });
 }
 
-function pieceName(kind: TileKind, mask?: Light): string {
+function pieceName(kind: TileKind, mask?: Light, from?: Light): string {
   switch (kind) {
     case "mirrorA": case "mirrorB": return "Mirror";
     case "splitter": return "Splitter";
-    case "prism": return "Prism";
-    case "filter": return `${LIGHT_LABEL[mask ?? 7] ?? ""} filter`;
+    case "crystal": return "Crystal";
+    case "tint": return from === undefined
+      ? `${LIGHT_LABEL[mask ?? 7] ?? ""} tint`
+      : `${LIGHT_LABEL[from] ?? ""} to ${LIGHT_LABEL[mask ?? 7] ?? ""}`;
     case "portal": return "Portal";
+    case "blackhole": return "Black hole";
+    case "whitehole": return "White hole";
     default: return kind;
   }
 }
@@ -237,6 +249,7 @@ function startLevel(n: number, isEndless = false) {
 
     game = new Game(gen.level);
     winGlow = 0;
+    clearFx();
     $("#level-name").textContent = gen.level.name;
     renderMeta(gen.level);
     renderTray();
@@ -267,6 +280,14 @@ function describeGoal(l: Level): string {
 function onSettled() {
   if (!game) return;
   if (game.phase === "won") {
+    // Burst each satisfied ring, staggered by index so they pop in sequence.
+    if (game.sim) {
+      let n = 0;
+      for (const i of game.sim.satisfied) {
+        spawnFx(i, "ring", now() + n * 0.09, game.sim.receptorLight.get(i) ?? 7);
+        n++;
+      }
+    }
     const s = game.score();
     const earned = 1 + s.stars;
     if (!endless) {
@@ -301,6 +322,8 @@ function showWin(s: ReturnType<Game["score"]>) {
   $("#win").hidden = false;
 }
 
+const now = () => performance.now() / 1000;
+
 let toastTimer = 0;
 function toast(msg: string, ms = 1800) {
   const t = $("#toast");
@@ -334,26 +357,34 @@ function renderNights() {
 // ---------------------------------------------------------------- how to play
 
 function renderHowto() {
-  const items: [TileKind, Light | undefined, string, string][] = [
-    ["mirrorB", undefined, "Mirror", "Bends light 90°. Tap one you placed to flip it."],
-    ["splitter", undefined, "Splitter", "Sends light out both sides at once — never straight on."],
-    ["prism", undefined, "Prism", "Separates white light into rose, mint and sky."],
-    ["filter", Chan.R, "Filter", "Removes every colour but its own. Light with none left dies."],
-    ["star", undefined, "Star", "Light passes through. Collect every one to finish the night."],
-    ["receptor", Chan.G, "Ring", "The goal. Must receive <em>exactly</em> its colour — too much light fails it too."],
-    ["receptor", Chan.R | Chan.B, "Two-colour ring",
+  const items: [TileKind, Light | undefined, Light | undefined, string, string][] = [
+    ["mirrorB", undefined, undefined, "Mirror",
+      "Bends light 90°. Tap one you placed to flip it, tap again to take it back."],
+    ["splitter", undefined, undefined, "Splitter",
+      "Sends light out both sides at once — never straight on."],
+    ["crystal", undefined, undefined, "Crystal",
+      "Separates moonlight into its three colours, one out of each side."],
+    ["tint", Chan.B, Chan.R, "Tint",
+      "Turns one colour into another. The two dots show which becomes which."],
+    ["blackhole", undefined, undefined, "Black hole",
+      "Swallows light. It falls back out of the white hole, still travelling the same way."],
+    ["star", undefined, undefined, "Star",
+      "Light passes through. Collect every one to finish the night."],
+    ["receptor", Chan.G, undefined, "Ring",
+      "The goal. Must receive <em>exactly</em> its colour — too much light fails it too."],
+    ["receptor", Chan.R | Chan.B, undefined, "Two-colour ring",
       "Dots inside a ring mean it needs those colours <em>together</em> — so two beams have to arrive at it."],
   ];
   const ul = $("#howto-list");
   ul.innerHTML = "";
-  for (const [kind, mask, name, desc] of items) {
+  for (const [kind, mask, from, name, desc] of items) {
     const li = document.createElement("li");
     const c = document.createElement("canvas");
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     c.width = c.height = Math.round(38 * dpr);
     const cc = c.getContext("2d")!;
     cc.scale(dpr, dpr);
-    drawIcon(cc, 38, kind, mask);
+    drawIcon(cc, 38, kind, mask, from);
     li.appendChild(c);
     const txt = document.createElement("div");
     txt.innerHTML = `<b>${name}</b><span>${desc}</span>`;
@@ -384,13 +415,13 @@ document.addEventListener("click", (e) => {
       game.start();
       break;
     }
-    case "reset": game?.reset(); renderTray(); break;
+    case "reset": game?.reset(); clearFx(); renderTray(); break;
     case "hint": {
       if (!game) return;
       toast(game.takeHint() ? "A piece belongs here." : "Nothing more to hint.", 2200);
       break;
     }
-    case "replay": $("#win").hidden = true; game?.reset(); renderTray(); break;
+    case "replay": $("#win").hidden = true; game?.reset(); clearFx(); renderTray(); break;
     case "next": $("#win").hidden = true; startLevel(night + 1, endless); break;
   }
 });
@@ -422,7 +453,7 @@ if (import.meta.env.DEV) {
     solveIt: () => {
       if (!game?.level.solution) return "no stored solution";
       for (const p of game.level.solution) {
-        game.board[p.i] = { kind: p.kind, mask: p.mask, placed: true };
+        game.board[p.i] = tileFrom(p, true);
         const slot = game.slotFor(p.kind, p.mask);
         if (slot) slot.used++;
       }

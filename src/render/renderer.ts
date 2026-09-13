@@ -10,6 +10,7 @@ import {
 } from "../engine/types";
 import { Segment, SimResult, resolveTiles } from "../engine/simulate";
 import { PALETTE as P, alpha, lightColor } from "./theme";
+import { drawFx } from "./fx";
 
 export interface ViewState {
   level: Level;
@@ -104,13 +105,21 @@ export function draw(
   // strikes, rather than decals floating on top of it.
   if (v.sim) drawBeams(ctx, L, v);
 
+  // How far the reveal has got, and when the light first reaches each cell.
+  // Without this, rings snapped on and pieces flared the instant Shine was
+  // pressed — the outcome was correct but it arrived before the beam did,
+  // which gave the whole animation away.
+  const front = frontOf(v);
+  const arrival = arrivalOrders(v);
+
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i];
     if (t.kind === "empty") continue;
-    drawTile(ctx, L, i, t, v);
+    drawTile(ctx, L, i, t, v, front, arrival);
   }
 
   drawMoon(ctx, L, v);
+  drawFx(ctx, L, v.time);
   if (v.winGlow > 0) drawWinGlow(ctx, cw, ch, v);
   drawGrain(ctx, cw, ch);
 }
@@ -177,39 +186,66 @@ function drawGrid(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
 
 // ---------------------------------------------------------------- beams
 
+/** The advancing front, in hops from the moon. Infinite when nothing is running. */
+function frontOf(v: ViewState): number {
+  if (!v.sim || !v.sim.segments.length) return Infinity;
+  const maxOrder = Math.max(...v.sim.segments.map((s) => s.order));
+  return v.reveal * (maxOrder + 1);
+}
+
+/** Cell index -> the earliest hop at which light arrives there. */
+function arrivalOrders(v: ViewState): Map<number, number> {
+  const m = new Map<number, number>();
+  if (!v.sim) return m;
+  for (const s of v.sim.segments) {
+    const i = s.y1 * v.level.w + s.x1;
+    const prev = m.get(i);
+    if (prev === undefined || s.order < prev) m.set(i, s.order);
+  }
+  return m;
+}
+
 function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
   const segs = v.sim!.segments;
   if (!segs.length) return;
-  const maxOrder = Math.max(...segs.map((s) => s.order));
-  const front = v.reveal * (maxOrder + 1);
+  const front = frontOf(v);
 
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+
+  /**
+   * How far along its own hop a segment has been drawn, 0..1.
+   *
+   * A segment of order N owns the interval [N-1, N] of the advancing front, so
+   * it grows from nothing to full length while the front crosses that cell.
+   * Getting this off by one made every hop snap to full length the instant it
+   * appeared, which is what made the beam look like it was stepping rather than
+   * travelling.
+   */
+  const progress = (s: Segment) => Math.min(1, Math.max(0, front - (s.order - 1)));
 
   // Two passes: a wide soft halo, then a bright narrow core. That is what sells
   // "glowing light" without an actual blur filter, which is expensive on phones.
   for (const pass of [0, 1] as const) {
     for (const s of segs) {
-      if (s.order > front) continue;
+      const p = progress(s);
+      if (p <= 0) continue;
       const c = lightColor(s.light);
-      const fade = Math.min(1, front - s.order + 1);
 
-      if (s.warp) { drawWarp(ctx, L, s, fade, v); continue; }
+      if (s.warp) { drawWarp(ctx, L, s, p, v); continue; }
 
       const a = cx(L, s.x0), b = cy(L, s.y0);
       const c2 = cx(L, s.x1), d2 = cy(L, s.y1);
-      // Partially reveal the leading segment so the light visibly travels.
-      const p = Math.min(1, Math.max(0, front - s.order + 1));
       const ex = a + (c2 - a) * p, ey = b + (d2 - b) * p;
 
       ctx.beginPath();
       ctx.moveTo(a, b);
       ctx.lineTo(ex, ey);
       if (pass === 0) {
-        ctx.strokeStyle = alpha(c, 0.16 * fade);
+        ctx.strokeStyle = alpha(c, 0.16);
         ctx.lineWidth = L.cell * 0.34;
       } else {
-        ctx.strokeStyle = alpha(c, 0.95 * fade);
+        ctx.strokeStyle = alpha(c, 0.95);
         ctx.lineWidth = L.cell * 0.085;
       }
       ctx.stroke();
@@ -217,10 +253,11 @@ function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
   }
 
   // The head of the beam: a small bright mote, a nod to the original's
-  // travelling ball.
-  const lead = segs.filter((s) => s.order <= front && s.order > front - 1 && !s.warp);
-  for (const s of lead) {
-    const p = Math.min(1, Math.max(0, front - s.order + 1));
+  // travelling ball. Only segments still growing have a head.
+  for (const s of segs) {
+    if (s.warp) continue;
+    const p = progress(s);
+    if (p <= 0 || p >= 1) continue;
     const hx = cx(L, s.x0) + (cx(L, s.x1) - cx(L, s.x0)) * p;
     const hy = cy(L, s.y0) + (cy(L, s.y1) - cy(L, s.y0)) * p;
     const c = lightColor(s.light);
@@ -258,14 +295,18 @@ function drawTile(
   i: number,
   t: Tile,
   v: ViewState,
+  front: number,
+  arrival: Map<number, number>,
 ) {
   const x = i % L.w, y = Math.floor(i / L.w);
   const px = cx(L, x), py = cy(L, y);
   const s = L.cell;
 
   // A piece the light is currently striking brightens, which is how the
-  // original signalled a hit without the ball and the object overlapping.
-  const struck = v.sim?.touched.has(i) && v.reveal > 0.02;
+  // original signalled a hit without the ball and the object overlapping —
+  // but only once the beam has actually got there.
+  const reached = arrival.has(i) && front >= (arrival.get(i) ?? Infinity);
+  const struck = (v.sim?.touched.has(i) ?? false) && (v.sim === null || reached);
   const lit = struck ? 1 : 0.78;
 
   ctx.save();
@@ -276,11 +317,16 @@ function drawTile(
     case "mirrorA": drawMirror(ctx, s, -1, lit); break;
     case "mirrorB": drawMirror(ctx, s, 1, lit); break;
     case "splitter": drawSplitter(ctx, s, lit); break;
-    case "prism": drawPrism(ctx, s, lit); break;
-    case "filter": drawFilter(ctx, s, t.mask ?? WHITE, lit); break;
+    case "crystal": drawCrystal(ctx, s, lit); break;
+    case "tint": drawTint(ctx, s, t.mask ?? WHITE, t.from, lit); break;
     case "portal": drawPortal(ctx, s, t.pair ?? 0, v); break;
+    case "blackhole": drawHole(ctx, s, true, v); break;
+    case "whitehole": drawHole(ctx, s, false, v); break;
     case "star": drawStar(ctx, s, v.starsLit.has(i), v); break;
-    case "receptor": drawReceptor(ctx, s, t.mask ?? WHITE, v.sim?.satisfied.has(i) ?? false, v); break;
+    case "receptor":
+      drawReceptor(ctx, s, t.mask ?? WHITE,
+                   (v.sim?.satisfied.has(i) ?? false) && reached, v);
+      break;
   }
 
   if (t.placed) {
@@ -328,7 +374,7 @@ function drawSplitter(ctx: CanvasRenderingContext2D, s: number, lit: number) {
   ctx.stroke();
 }
 
-function drawPrism(ctx: CanvasRenderingContext2D, s: number, lit: number) {
+function drawCrystal(ctx: CanvasRenderingContext2D, s: number, lit: number) {
   const r = s * 0.30;
   ctx.beginPath();
   ctx.moveTo(0, -r);
@@ -348,24 +394,100 @@ function drawPrism(ctx: CanvasRenderingContext2D, s: number, lit: number) {
   ctx.stroke();
 }
 
-function drawFilter(ctx: CanvasRenderingContext2D, s: number, mask: Light, lit: number) {
+/**
+ * A tint converts one colour into another, so it is drawn as exactly that: the
+ * colour going in on one side, the colour coming out on the other, split by a
+ * diagonal. A single-colour swatch would say "this is red" when what it means
+ * is "red becomes blue".
+ */
+function drawTint(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  to: Light,
+  from: Light | undefined,
+  lit: number,
+) {
   const r = s * 0.26;
+  const cTo = lightColor(to);
+  const cFrom = from === undefined ? P.inkDim : lightColor(from);
+
   roundRect(ctx, -r, -r, r * 2, r * 2, s * 0.07);
-  ctx.fillStyle = alpha(lightColor(mask), 0.26 * lit);
+  ctx.save();
+  ctx.clip();
+  // Incoming colour, upper-left.
+  ctx.fillStyle = alpha(cFrom, 0.34 * lit);
+  ctx.beginPath();
+  ctx.moveTo(-r, -r); ctx.lineTo(r, -r); ctx.lineTo(-r, r); ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = alpha(lightColor(mask), 0.95 * lit);
+  // Outgoing colour, lower-right.
+  ctx.fillStyle = alpha(cTo, 0.55 * lit);
+  ctx.beginPath();
+  ctx.moveTo(r, -r); ctx.lineTo(r, r); ctx.lineTo(-r, r); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // The dividing edge, drawn in the outgoing colour so the direction reads.
+  ctx.beginPath();
+  ctx.moveTo(r, -r); ctx.lineTo(-r, r);
+  ctx.strokeStyle = alpha(cTo, 0.85 * lit);
+  ctx.lineWidth = Math.max(1.2, s * 0.03);
+  ctx.stroke();
+
+  roundRect(ctx, -r, -r, r * 2, r * 2, s * 0.07);
+  ctx.strokeStyle = alpha(cTo, 0.9 * lit);
   ctx.lineWidth = Math.max(1.4, s * 0.042);
   ctx.stroke();
 
-  // Channel pips: which of R/G/B this filter lets through.
-  const chans = [Chan.R, Chan.G, Chan.B].filter((c) => mask & c);
-  const gap = s * 0.085;
-  chans.forEach((c, k) => {
-    ctx.fillStyle = lightColor(c);
+  // Two pips, from -> to, so the conversion is legible without colour vision.
+  const pip = (dx: number, col: string) => {
     ctx.beginPath();
-    ctx.arc((k - (chans.length - 1) / 2) * gap, 0, s * 0.032, 0, Math.PI * 2);
+    ctx.arc(dx, 0, s * 0.03, 0, Math.PI * 2);
+    ctx.fillStyle = col;
     ctx.fill();
-  });
+  };
+  pip(-s * 0.075, cFrom);
+  pip(s * 0.075, cTo);
+}
+
+/**
+ * A black hole swallows light; its white hole gives it back. Drawn as a matched
+ * pair — same rings, inverted — so it is obvious which is which and that they
+ * belong together.
+ */
+function drawHole(ctx: CanvasRenderingContext2D, s: number, black: boolean, v: ViewState) {
+  const r = s * 0.30;
+  const spin = v.time * (black ? 1.1 : -1.1);
+
+  if (black) {
+    // A dark well with a bright accretion rim.
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, "#05030d");
+    g.addColorStop(0.72, "#0b0718");
+    g.addColorStop(1, alpha("#8f6bd6", 0.55));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  } else {
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, alpha("#fff6e0", 0.95));
+    g.addColorStop(0.55, alpha("#ffe6a8", 0.45));
+    g.addColorStop(1, alpha("#ffe6a8", 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Two arcs spiralling in (or out), which is the only motion cue that reads at
+  // this size.
+  ctx.save();
+  ctx.rotate(spin);
+  for (let k = 0; k < 2; k++) {
+    ctx.beginPath();
+    ctx.arc(0, 0, r * (0.94 - k * 0.26), k * Math.PI, k * Math.PI + Math.PI * 1.15);
+    ctx.strokeStyle = alpha(black ? "#b79bff" : "#ffe6a8", 0.85 - k * 0.28);
+    ctx.lineWidth = Math.max(1.2, s * 0.032);
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawWall(ctx: CanvasRenderingContext2D, s: number, _t: Tile, _v: ViewState) {
@@ -506,27 +628,56 @@ function drawMoon(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
     ctx.save();
     ctx.translate(px, py + bob);
 
-    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 3.4);
-    g.addColorStop(0, P.moonGlow);
-    g.addColorStop(1, "rgba(255,226,154,0)");
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(0, 0, r * 3.4, 0, Math.PI * 2); ctx.fill();
-
     // Crescent as one even-odd path: a disc with an offset disc subtracted.
     // Doing this with `destination-out` would erase the sky behind it too,
-    // punching a black hole in the canvas.
+    // punching a hole in the canvas.
     const moon = new Path2D();
     moon.arc(0, 0, r, 0, Math.PI * 2);
-    moon.arc(r * 0.46, -r * 0.22, r * 0.92, 0, Math.PI * 2);
+    moon.arc(r * 0.52, -r * 0.20, r * 0.94, 0, Math.PI * 2);
+
+    // The glow has to hug the crescent, not sit behind it as a disc.
+    //
+    // A radial gradient centred on the moon shines brightest exactly through
+    // the bitten-out part, so you saw a soft full disc *and* a bright crescent
+    // — two moons. Shadow-blurring the crescent path itself puts the light only
+    // where the moon actually is.
+    ctx.save();
+    ctx.shadowColor = P.moonGlow;
+    ctx.shadowBlur = r * 1.5;
     ctx.fillStyle = P.moon;
     ctx.fill(moon, "evenodd");
+    ctx.shadowBlur = r * 0.7;
+    ctx.fill(moon, "evenodd");   // second pass deepens the near glow
+    ctx.restore();
+
+    ctx.fillStyle = P.moon;
+    ctx.fill(moon, "evenodd");
+
+    // When the beam is running, the moon brightens as it lets the light go.
+    if (v.sim && v.reveal > 0 && v.reveal < 1.1) {
+      const pulse = Math.max(0, 1 - v.reveal * 2.2);
+      if (pulse > 0) {
+        ctx.save();
+        ctx.globalAlpha = pulse * 0.7;
+        ctx.shadowColor = "#ffffff";
+        ctx.shadowBlur = r * (1 + pulse * 2.5);
+        ctx.fillStyle = "#fffdf4";
+        ctx.fill(moon, "evenodd");
+        ctx.restore();
+      }
+    }
 
     ctx.restore();
   }
 }
 
 function drawWinGlow(ctx: CanvasRenderingContext2D, w: number, h: number, v: ViewState) {
-  ctx.fillStyle = alpha("#ffe6a8", 0.16 * v.winGlow);
+  // A warm wash, brightest at the top where the moon is, so winning reads as
+  // the sky lifting rather than a flashbulb.
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, alpha("#ffe6a8", 0.22 * v.winGlow));
+  g.addColorStop(1, alpha("#c8a6ff", 0.06 * v.winGlow));
+  ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
 }
 
@@ -571,7 +722,13 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
  * Reuses the exact board drawing code so the tray can never drift from the
  * board visually.
  */
-export function drawIcon(ctx: CanvasRenderingContext2D, size: number, kind: Tile["kind"], mask?: Light) {
+export function drawIcon(
+  ctx: CanvasRenderingContext2D,
+  size: number,
+  kind: Tile["kind"],
+  mask?: Light,
+  from?: Light,
+) {
   ctx.clearRect(0, 0, size, size);
   ctx.save();
   ctx.translate(size / 2, size / 2);
@@ -580,8 +737,10 @@ export function drawIcon(ctx: CanvasRenderingContext2D, size: number, kind: Tile
     case "mirrorA": drawMirror(ctx, s, -1, 1); break;
     case "mirrorB": drawMirror(ctx, s, 1, 1); break;
     case "splitter": drawSplitter(ctx, s, 1); break;
-    case "prism": drawPrism(ctx, s, 1); break;
-    case "filter": drawFilter(ctx, s, mask ?? WHITE, 1); break;
+    case "crystal": drawCrystal(ctx, s, 1); break;
+    case "tint": drawTint(ctx, s, mask ?? WHITE, from, 1); break;
+    case "blackhole": drawHole(ctx, s, true, { time: 0 } as ViewState); break;
+    case "whitehole": drawHole(ctx, s, false, { time: 0 } as ViewState); break;
     case "portal": drawPortal(ctx, s, 0, { time: 0 } as ViewState); break;
     case "star": drawStar(ctx, s, true, { time: 0 } as ViewState); break;
     case "receptor": drawReceptor(ctx, s, mask ?? WHITE, false, { time: 0 } as ViewState); break;

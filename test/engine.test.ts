@@ -4,7 +4,7 @@
  * The physics here is load-bearing for the generator, so these check the actual
  * reflection tables against the thesis rules rather than just "it did something".
  */
-import { Chan, Dir, Level, Tile, WHITE, idx } from "../src/engine/types";
+import { Chan, Dir, Level, Tile, WHITE, idx, tileFrom } from "../src/engine/types";
 import { simulate, evaluate } from "../src/engine/simulate";
 import { solve } from "../src/engine/solver";
 import { generateLevel, generateCampaignLevel, campaignDifficulty } from "../src/engine/generate";
@@ -98,39 +98,48 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
 }
 
 {
-  // Prism separates white into three channels on three sides.
+  // The crystal separates white into three channels on three sides.
   const l = board(5, 5, 2);
-  put(l, 2, 2, { kind: "prism" });
+  put(l, 2, 2, { kind: "crystal" });
   put(l, 4, 2, { kind: "receptor", mask: Chan.R });
   put(l, 2, 4, { kind: "receptor", mask: Chan.G });
   put(l, 0, 2, { kind: "receptor", mask: Chan.B });
   const r = simulate(l);
-  eq("prism separates R/G/B on three sides", r.satisfied.size, 3);
+  eq("crystal separates R/G/B on three sides", r.satisfied.size, 3);
 }
 
 {
-  // A coloured beam passes a prism untouched (thesis rule).
+  // A coloured beam passes a crystal untouched (thesis rule).
   const l = board(5, 5, 2, Chan.R);
-  put(l, 2, 2, { kind: "prism" });
+  put(l, 2, 2, { kind: "crystal" });
   put(l, 2, 4, { kind: "receptor", mask: Chan.R });
-  ok("prism ignores already-separated light", simulate(l).satisfied.size === 1);
+  ok("crystal ignores already-separated light", simulate(l).satisfied.size === 1);
 }
 
 {
-  // Filters subtract. White through a red filter is red.
+  // A tint converts. Any light through an untargeted tint leaves as its colour.
   const l = board(5, 5, 2);
-  put(l, 2, 2, { kind: "filter", mask: Chan.R });
+  put(l, 2, 2, { kind: "tint", mask: Chan.R });
   put(l, 2, 4, { kind: "receptor", mask: Chan.R });
-  ok("filter subtracts to red", simulate(l).satisfied.size === 1);
+  ok("untargeted tint converts anything to its colour", simulate(l).satisfied.size === 1);
 }
 
 {
-  // ...and a filter that passes nothing kills the beam.
+  // A targeted tint converts only its own `from` colour...
   const l = board(5, 5, 2, Chan.R);
-  put(l, 2, 2, { kind: "filter", mask: Chan.B });
-  put(l, 2, 4, { kind: "receptor", mask: Chan.R });
+  put(l, 2, 2, { kind: "tint", from: Chan.R, mask: Chan.B });
+  put(l, 2, 4, { kind: "receptor", mask: Chan.B });
+  ok("targeted tint converts red to blue", simulate(l).satisfied.size === 1);
+}
+
+{
+  // ...and leaves everything else alone rather than killing it. This is the
+  // rule that changed: the old subtractive filter would have absorbed this.
+  const l = board(5, 5, 2, Chan.G);
+  put(l, 2, 2, { kind: "tint", from: Chan.R, mask: Chan.B });
+  put(l, 2, 4, { kind: "receptor", mask: Chan.G });
   const r = simulate(l);
-  ok("incompatible filter absorbs the beam", r.satisfied.size === 0);
+  ok("a tint never destroys light it does not match", r.satisfied.size === 1);
 }
 
 {
@@ -141,14 +150,39 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
 }
 
 {
-  // Two beams combining additively *do* satisfy a compound receptor.
-  // Prism at (2,1); red goes right, blue goes left; mirrors fold both down
-  // into a single yellow... (R|B = magenta) receptor at the bottom.
+  // A crystal puts three different colours on the board at once.
   const l = board(5, 5, 2);
-  put(l, 2, 1, { kind: "prism" });
-  put(l, 4, 1, { kind: "mirrorA" });   // red travelling Right -> Up? check below
+  put(l, 2, 1, { kind: "crystal" });
   const r = simulate(l);
-  ok("prism produces three distinct colours", new Set(r.segments.map((s) => s.light)).size >= 3);
+  ok("crystal produces three distinct colours", new Set(r.segments.map((s) => s.light)).size >= 3);
+}
+
+{
+  // A black hole swallows light and the white hole gives it back, still
+  // travelling the same way.
+  const l = board(5, 5, 0);
+  put(l, 0, 1, { kind: "blackhole", pair: 1 });
+  put(l, 4, 1, { kind: "whitehole", pair: 1 });
+  put(l, 4, 4, { kind: "receptor", mask: WHITE });
+  ok("black hole feeds its white hole", simulate(l).satisfied.size === 1);
+}
+
+{
+  // ...but only one way. Light into the white hole just passes through; it
+  // does not come back out of the black hole. That asymmetry is the point.
+  const l = board(5, 5, 4);
+  put(l, 4, 1, { kind: "whitehole", pair: 1 });
+  put(l, 0, 1, { kind: "blackhole", pair: 1 });
+  put(l, 4, 4, { kind: "receptor", mask: WHITE });
+  ok("a white hole is an exit only", simulate(l).satisfied.size === 1);
+}
+
+{
+  // A black hole with no white hole is a dead end, not a pass-through.
+  const l = board(5, 5, 2);
+  put(l, 2, 2, { kind: "blackhole", pair: 9 });
+  put(l, 2, 4, { kind: "receptor", mask: WHITE });
+  ok("an unpaired black hole absorbs", simulate(l).satisfied.size === 0);
 }
 
 {
@@ -261,7 +295,7 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
       if (!sol || sol.length === 0) { noSolution++; continue; }
 
       const board: Level = { ...g.level, tiles: g.level.tiles.map((t) => ({ ...t })), inventory: [] };
-      for (const p of sol) board.tiles[p.i] = { kind: p.kind, mask: p.mask };
+      for (const p of sol) board.tiles[p.i] = tileFrom(p);
       if (!evaluate(board).won) badSolution++;
 
       (buckets[d] ??= []).push(g.level.difficulty ?? 0);
@@ -337,7 +371,7 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
   for (const n of [5, 15, 40]) {
     const c = generateCampaignLevel(n);
     const b: Level = { ...c.level, tiles: c.level.tiles.map((t) => ({ ...t })), inventory: [] };
-    for (const p of c.level.solution ?? []) b.tiles[p.i] = { kind: p.kind, mask: p.mask };
+    for (const p of c.level.solution ?? []) b.tiles[p.i] = tileFrom(p);
     ok(`campaign level ${n} is solvable`, (c.level.solution?.length ?? 0) > 0 && evaluate(b).won);
   }
 }

@@ -19,7 +19,7 @@
 import { Level, Tile, TileKind, Light } from "./types";
 import { evaluate, simulate } from "./simulate";
 
-export interface Placement { i: number; kind: TileKind; mask?: Light }
+export interface Placement { i: number; kind: TileKind; mask?: Light; from?: Light }
 
 export interface SolveResult {
   solved: boolean;
@@ -53,17 +53,17 @@ export interface SolveOpts {
  * tap-to-cycle feel of the original, at the cost of the solver having to try
  * both orientations at every candidate cell.
  */
-export const poolKey = (k: TileKind, m?: Light) =>
-  k === "mirrorA" || k === "mirrorB" ? "mirror" : `${k}:${m ?? ""}`;
+export const poolKey = (k: TileKind, m?: Light, from?: Light) =>
+  k === "mirrorA" || k === "mirrorB" ? "mirror" : `${k}:${m ?? ""}:${from ?? ""}`;
 
 /** Expand an inventory into the distinct pieces that may be placed. */
-function pieceTypes(level: Level): { kind: TileKind; mask?: Light }[] {
-  const out: { kind: TileKind; mask?: Light }[] = [];
+function pieceTypes(level: Level): { kind: TileKind; mask?: Light; from?: Light }[] {
+  const out: { kind: TileKind; mask?: Light; from?: Light }[] = [];
   let mirrors = false;
   for (const it of level.inventory) {
     if (it.count <= 0) continue;
     if (it.kind === "mirrorA" || it.kind === "mirrorB") { mirrors = true; continue; }
-    out.push({ kind: it.kind, mask: it.mask });
+    out.push({ kind: it.kind, mask: it.mask, from: it.from });
   }
   if (mirrors) out.push({ kind: "mirrorA" }, { kind: "mirrorB" });
   return out;
@@ -113,7 +113,7 @@ export function solve(level: Level, opts: SolveOpts = {}): SolveResult {
   const remaining = new Map<string, number>();
   const keyOf = poolKey;
   for (const it of level.inventory) {
-    const k = keyOf(it.kind, it.mask);
+    const k = keyOf(it.kind, it.mask, it.from);
     remaining.set(k, (remaining.get(k) ?? 0) + it.count);
   }
 
@@ -124,7 +124,7 @@ export function solve(level: Level, opts: SolveOpts = {}): SolveResult {
   let truncated = false;
 
   const signature = () =>
-    placed.map((p) => `${p.i}${p.kind}${p.mask ?? ""}`).sort().join("|");
+    placed.map((p) => `${p.i}${p.kind}${p.mask ?? ""}${p.from ?? ""}`).sort().join("|");
 
   /** Explore, never placing more than `limit` pieces in total. */
   const dfs = (limit: number): boolean => {
@@ -144,17 +144,17 @@ export function solve(level: Level, opts: SolveOpts = {}): SolveResult {
 
     for (const i of frontierFrom(work, out.touched)) {
       for (const t of types) {
-        const left = remaining.get(keyOf(t.kind, t.mask)) ?? 0;
+        const left = remaining.get(keyOf(t.kind, t.mask, t.from)) ?? 0;
         if (left <= 0) continue;
 
-        tiles[i] = { kind: t.kind, mask: t.mask, placed: true };
-        remaining.set(keyOf(t.kind, t.mask), left - 1);
-        placed.push({ i, kind: t.kind, mask: t.mask });
+        tiles[i] = { kind: t.kind, mask: t.mask, from: t.from, placed: true };
+        remaining.set(keyOf(t.kind, t.mask, t.from), left - 1);
+        placed.push({ i, kind: t.kind, mask: t.mask, from: t.from });
 
         const found = dfs(limit);
 
         placed.pop();
-        remaining.set(keyOf(t.kind, t.mask), left);
+        remaining.set(keyOf(t.kind, t.mask, t.from), left);
         tiles[i] = { kind: "empty" };
 
         if (found && opts.firstOnly) return true;
@@ -236,12 +236,12 @@ export function features(level: Level, res: SolveResult): number[] {
       if (m !== 7 && channels(m) > 1) combined++;
     }
     if (t.kind === "star") stars++;
-    if (t.kind === "splitter" || t.kind === "prism") branchers++;
+    if (t.kind === "splitter" || t.kind === "crystal") branchers++;
     if (t.track && t.track.length > 1) moving++;
   }
   for (const it of level.inventory) {
-    if (it.kind === "splitter" || it.kind === "prism") branchers += it.count;
-    if (it.kind === "filter") branchers += it.count * 0.5;
+    if (it.kind === "splitter" || it.kind === "crystal") branchers += it.count;
+    if (it.kind === "tint") branchers += it.count * 0.5;
   }
 
   const par = isFinite(res.minPieces) ? res.minPieces : 7;
@@ -271,7 +271,7 @@ export function features(level: Level, res: SolveResult): number[] {
  * vectors, using the requested target as the ground-truth label. Re-run the
  * tool and paste the output here after changing the generator's budgets.
  *
- * Fit on 596 levels: R^2 = 0.972, RMSE = 0.50.
+ * Fit on 579 levels: R^2 = 0.973, RMSE = 0.50.
  *
  * A few weights come out negative. That is collinearity, not a claim that
  * moving parts make a level easier — stars, moving parts and high piece counts
@@ -282,19 +282,19 @@ export function features(level: Level, res: SolveResult): number[] {
  */
 const COEF: readonly number[] = [
   // base, then one per FEATURE_NAMES entry
-  0.7214,  // base
-  0.3999,  // par
-  0.0538,  // branchers
-  -0.0565, // colours
-  -0.1847, // receptors
-  1.3917,  // stars
-  0.3329,  // trayExtra
-  -0.1282, // moving
-  0.2067,  // search
-  0.2748,  // resisted
-  -0.1417, // tightness
-  0.0192,  // depth
-  0.0698,  // combined
+  0.8554,  // base
+  0.4360,  // par
+  0.0969,  // branchers
+  -0.0473, // colours
+  -0.0824, // receptors
+  1.3446,  // stars
+  0.3271,  // trayExtra
+  -0.2350, // moving
+  0.1649,  // search
+  0.0502,  // resisted
+  -0.2016, // tightness
+  0.0015,  // depth
+  0.0293,  // combined
 ];
 
 export function scoreDifficulty(level: Level, res: SolveResult): number {
