@@ -215,6 +215,7 @@ export const FEATURE_NAMES = [
   "resisted",   // whether it exhausted the solver's budget outright
   "tightness",  // how few other ways in there are
   "depth",      // how far the light travels before resolving
+  "combined",   // rings needing two channels at once, i.e. two converging beams
 ] as const;
 
 /** Extract the difficulty feature vector for a level. */
@@ -222,9 +223,18 @@ export function features(level: Level, res: SolveResult): number[] {
   const sim = simulate(level, 0);
 
   const colours = new Set<Light>();
-  let branchers = 0, receptors = 0, stars = 0, moving = 0;
+  let branchers = 0, receptors = 0, stars = 0, moving = 0, combined = 0;
+  const channels = (m: Light) => (m & 1) + ((m >> 1) & 1) + ((m >> 2) & 1);
   for (const t of level.tiles) {
-    if (t.kind === "receptor") { receptors++; colours.add(t.mask ?? 7); }
+    if (t.kind === "receptor") {
+      receptors++;
+      colours.add(t.mask ?? 7);
+      // Needing red *and* blue is not "a colour" — it is two beams that have to
+      // arrive at the same cell. The model consistently under-rated levels
+      // built on that, so it gets its own term.
+      const m = t.mask ?? 7;
+      if (m !== 7 && channels(m) > 1) combined++;
+    }
     if (t.kind === "star") stars++;
     if (t.kind === "splitter" || t.kind === "prism") branchers++;
     if (t.track && t.track.length > 1) moving++;
@@ -249,6 +259,7 @@ export function features(level: Level, res: SolveResult): number[] {
     res.truncated ? 1 : 0,
     res.solutionCount <= 2 ? 1 : res.solutionCount <= 6 ? 0.5 : 0,
     Math.min(40, sim.depth),
+    combined,
   ];
 }
 
@@ -260,7 +271,7 @@ export function features(level: Level, res: SolveResult): number[] {
  * vectors, using the requested target as the ground-truth label. Re-run the
  * tool and paste the output here after changing the generator's budgets.
  *
- * Fit on 601 levels: R^2 = 0.972, RMSE = 0.50.
+ * Fit on 596 levels: R^2 = 0.972, RMSE = 0.50.
  *
  * A few weights come out negative. That is collinearity, not a claim that
  * moving parts make a level easier — stars, moving parts and high piece counts
@@ -271,18 +282,19 @@ export function features(level: Level, res: SolveResult): number[] {
  */
 const COEF: readonly number[] = [
   // base, then one per FEATURE_NAMES entry
-  0.7348,  // base
-  0.3956,  // par
-  0.0666,  // branchers
-  -0.0576, // colours
-  -0.2130, // receptors
-  1.3941,  // stars
-  0.3295,  // trayExtra
-  -0.0808, // moving
-  0.2096,  // search
-  0.2548,  // resisted
-  -0.1663, // tightness
-  0.0223,  // depth
+  0.7214,  // base
+  0.3999,  // par
+  0.0538,  // branchers
+  -0.0565, // colours
+  -0.1847, // receptors
+  1.3917,  // stars
+  0.3329,  // trayExtra
+  -0.1282, // moving
+  0.2067,  // search
+  0.2748,  // resisted
+  -0.1417, // tightness
+  0.0192,  // depth
+  0.0698,  // combined
 ];
 
 export function scoreDifficulty(level: Level, res: SolveResult): number {

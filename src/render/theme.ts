@@ -36,12 +36,12 @@ export const PALETTE = {
  * point is cozy, not arcade.
  */
 export const LIGHT_COLOR: Record<number, string> = {
-  [Chan.R]: "#ff7d9e",                       // rose
+  [Chan.R]: "#ff6b6b",                       // rose  — pulled warm and clearly red
   [Chan.G]: "#86f0ae",                       // mint
   [Chan.B]: "#7cc4ff",                       // sky
-  [Chan.R | Chan.G]: "#ffd484",              // amber
-  [Chan.R | Chan.B]: "#f39bf0",              // orchid
-  [Chan.G | Chan.B]: "#8ef0e4",              // aqua
+  [Chan.R | Chan.G]: "#ffd166",              // amber
+  [Chan.R | Chan.B]: "#c98bff",              // orchid — pulled to violet, away from rose
+  [Chan.G | Chan.B]: "#6ee7e0",              // aqua
   [Chan.R | Chan.G | Chan.B]: "#fff6e0",     // moonlight
 };
 

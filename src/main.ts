@@ -340,7 +340,9 @@ function renderHowto() {
     ["prism", undefined, "Prism", "Separates white light into rose, mint and sky."],
     ["filter", Chan.R, "Filter", "Removes every colour but its own. Light with none left dies."],
     ["star", undefined, "Star", "Light passes through. Collect every one to finish the night."],
-    ["receptor", Chan.G, "Ring", "The goal. Must receive exactly its colour — mixing counts."],
+    ["receptor", Chan.G, "Ring", "The goal. Must receive <em>exactly</em> its colour — too much light fails it too."],
+    ["receptor", Chan.R | Chan.B, "Two-colour ring",
+      "Dots inside a ring mean it needs those colours <em>together</em> — so two beams have to arrive at it."],
   ];
   const ul = $("#howto-list");
   ul.innerHTML = "";

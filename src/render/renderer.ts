@@ -472,7 +472,28 @@ function drawReceptor(
     ctx.arc(0, 0, r * 0.52, 0, Math.PI * 2);
     ctx.fillStyle = alpha(c, 0.9);
     ctx.fill();
+    return;
   }
+
+  // Channel pips: exactly which of R/G/B this ring needs, drawn inside it.
+  //
+  // Colour alone is not enough to carry this. A ring wanting red and a ring
+  // wanting red+blue are different puzzles — one beam versus two converging —
+  // but as two pastel outlines they read as "the pinkish one" and the player
+  // spends the level wondering why their red beam does nothing. The pips make
+  // the requirement countable, and work without colour vision.
+  // A single channel is unambiguous from the ring's own colour, and white is
+  // the default every level opens with — neither needs annotating.
+  if (mask === WHITE) return;
+  const chans = [Chan.R, Chan.G, Chan.B].filter((ch) => mask & ch);
+  if (chans.length < 2) return;
+  const gap = s * 0.075;
+  chans.forEach((ch, k) => {
+    ctx.beginPath();
+    ctx.arc((k - (chans.length - 1) / 2) * gap, 0, s * 0.026, 0, Math.PI * 2);
+    ctx.fillStyle = lightColor(ch);
+    ctx.fill();
+  });
 }
 
 function drawMoon(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {

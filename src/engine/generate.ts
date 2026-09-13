@@ -305,15 +305,25 @@ function excavate(
   let live = chosen.slice(0, wanted);
   for (const i of live) tiles[i] = { kind: "receptor", mask: WHITE };
 
+  // A ring wanting two channels at once needs two separate beams converging on
+  // it, which is a genuinely different and much harder idea than aiming one
+  // beam. Hold it back until the player has had time to meet prisms and
+  // splitters on their own.
+  const allowCombined = d >= 6;
+  const channels = (m: Light) => (m & 1) + ((m >> 1) & 1) + ((m >> 2) & 1);
+
   // Settle: absorbing at one receptor changes what reaches the others, so read
   // the masks back and drop any receptor left in the dark, until it converges.
-  for (let pass = 0; pass < 4 && live.length; pass++) {
+  for (let pass = 0; pass < 5 && live.length; pass++) {
     const sim = simulate(probe(), 0);
     const survivors: number[] = [];
     let changed = false;
     for (const i of live) {
       const got = sim.receptorLight.get(i) ?? 0;
       if (got === 0) { tiles[i] = { kind: "empty" }; changed = true; continue; }
+      if (!allowCombined && channels(got) > 1 && got !== WHITE) {
+        tiles[i] = { kind: "empty" }; changed = true; continue;
+      }
       if (tiles[i].mask !== got) { tiles[i] = { kind: "receptor", mask: got }; changed = true; }
       survivors.push(i);
     }
