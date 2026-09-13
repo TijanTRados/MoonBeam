@@ -83,7 +83,8 @@ function budgetFor(d: number) {
     walls: Math.min(7, Math.floor(d * 0.8)),
     /** Whether to attempt a moving shutter (adds the timing dimension). */
     moving: d >= 7,
-    portals: d >= 8,
+    /** Chance the walk drops a portal pair, making routing non-local. */
+    portalChance: d < 8 ? 0 : Math.min(0.09, (d - 7) * 0.03),
   };
 }
 
@@ -109,6 +110,7 @@ function construct(r: Rand, w: number, h: number, d: number) {
   const queue: Branch[] = [{ ...emitter, steps: 0 }];
   const terminals: { x: number; y: number; light: Light }[] = [];
   let placedCount = 0;
+  let portalUsed = false;
   const guard = new Set<string>();
 
   while (queue.length) {
@@ -133,6 +135,48 @@ function construct(r: Rand, w: number, h: number, d: number) {
       const i = y * w + x;
       pathCells.push(i);
       const cell = tiles[i];
+
+      // Portals are resolved here rather than in `applyExisting`, because where
+      // the light re-emerges depends on the twin's position — a property of the
+      // board, not of the tile. They are always level furniture, never tray
+      // pieces: the puzzle is routing light *through* them, not placing them.
+      if (cell.kind === "portal") {
+        const twin = tiles.findIndex(
+          (t, j) => j !== i && t.kind === "portal" && t.pair === cell.pair,
+        );
+        if (twin < 0) break;
+        x = twin % w;
+        y = Math.floor(twin / w);
+        pathCells.push(twin);
+        x += DELTA[dir].x;
+        y += DELTA[dir].y;
+        steps++;
+        continue;
+      }
+
+      if (cell.kind === "empty" && !portalUsed && steps > 1 && chance(r, b.portalChance)) {
+        // Drop a pair and jump. Keeping the exit well away from the entrance
+        // stops the jump reading as a wobble rather than a teleport.
+        const free: number[] = [];
+        for (let j = 0; j < tiles.length; j++) {
+          if (tiles[j].kind !== "empty" || j === i) continue;
+          const jx = j % w, jy = Math.floor(j / w);
+          if (Math.abs(jx - x) + Math.abs(jy - y) > 3) free.push(j);
+        }
+        if (free.length) {
+          const twin = pick(r, free);
+          tiles[i] = { kind: "portal", pair: 1 };
+          tiles[twin] = { kind: "portal", pair: 1 };
+          portalUsed = true;
+          x = twin % w;
+          y = Math.floor(twin / w);
+          pathCells.push(twin);
+          x += DELTA[dir].x;
+          y += DELTA[dir].y;
+          steps++;
+          continue;
+        }
+      }
 
       if (cell.kind !== "empty") {
         // An earlier branch already furnished this cell. Obey it rather than
@@ -314,7 +358,12 @@ function excavate(
     else inv.set(k, { kind: k === "mirror" ? "mirrorB" : kind, mask, count: 1 });
   };
   for (const p of built.solutionCells) {
-    if (tiles[p.i].kind === "empty") continue; // consumed by a receptor/star
+    // Only lift a cell that still holds the exact piece we recorded. A later
+    // phase of the walk may have built something else on top of it, and
+    // clearing that would delete level furniture — which is how a portal pair
+    // once lost half of itself.
+    const t = tiles[p.i];
+    if (t.kind !== p.kind || t.mask !== p.mask) continue;
     tiles[p.i] = { kind: "empty" };
     add(p.kind, p.mask);
   }

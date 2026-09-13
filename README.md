@@ -134,7 +134,7 @@ search resistance, solution count — scale cleanly with that target. So the tar
 is treated as a ground-truth label and a least-squares fit gives the weights:
 
 ```
-Fit on 610 generated levels:  R² = 0.975,  RMSE = 0.49
+Fit on 601 generated levels:  R² = 0.972,  RMSE = 0.50
 
   target  1 → 1.3     target  6 → 5.5
   target  2 → 1.8     target  7 → 7.4

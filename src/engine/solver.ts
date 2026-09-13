@@ -260,7 +260,7 @@ export function features(level: Level, res: SolveResult): number[] {
  * vectors, using the requested target as the ground-truth label. Re-run the
  * tool and paste the output here after changing the generator's budgets.
  *
- * Fit on 610 levels: R^2 = 0.975, RMSE = 0.49.
+ * Fit on 601 levels: R^2 = 0.972, RMSE = 0.50.
  *
  * A few weights come out negative. That is collinearity, not a claim that
  * moving parts make a level easier — stars, moving parts and high piece counts
@@ -271,18 +271,18 @@ export function features(level: Level, res: SolveResult): number[] {
  */
 const COEF: readonly number[] = [
   // base, then one per FEATURE_NAMES entry
-  0.9184,  // base
-  0.4589,  // par
-  0.0908,  // branchers
-  -0.0731, // colours
-  -0.0377, // receptors
-  1.2061,  // stars
-  0.3564,  // trayExtra
-  -0.1149, // moving
-  0.1604,  // search
-  0.1700,  // resisted
-  -0.1405, // tightness
-  -0.0322, // depth
+  0.7348,  // base
+  0.3956,  // par
+  0.0666,  // branchers
+  -0.0576, // colours
+  -0.2130, // receptors
+  1.3941,  // stars
+  0.3295,  // trayExtra
+  -0.0808, // moving
+  0.2096,  // search
+  0.2548,  // resisted
+  -0.1663, // tightness
+  0.0223,  // depth
 ];
 
 export function scoreDifficulty(level: Level, res: SolveResult): number {

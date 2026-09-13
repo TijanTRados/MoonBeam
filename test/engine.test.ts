@@ -299,6 +299,23 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
 }
 
 {
+  // Portals must always come in pairs. They were once losing a twin: the walk
+  // could drop a portal on top of a piece it had already placed, and excavation
+  // then cleared that cell believing it was lifting the piece.
+  let odd = 0, withPortals = 0;
+  for (const d of [8, 9, 10]) {
+    for (let s = 0; s < 10; s++) {
+      const g = generateLevel(s * 6151 + d * 911, { difficulty: d });
+      const n = g.level.tiles.filter((t) => t.kind === "portal").length;
+      if (n) withPortals++;
+      if (n % 2 !== 0) odd++;
+    }
+  }
+  ok("portals are always paired", odd === 0, `${odd} levels with an odd count`);
+  ok("portals actually appear at high difficulty", withPortals > 0, `${withPortals}/30`);
+}
+
+{
   // Generated levels must have a real goal and a real tray.
   let noReceptor = 0, emptyTray = 0;
   for (let s = 0; s < 30; s++) {
