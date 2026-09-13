@@ -21,8 +21,8 @@ separated, recombined and spent carefully rather than just aimed.
 Every level is generated, verified and difficulty-rated at runtime. There is no
 level file anywhere in this repository.
 
-- **Play:** <https://tijantrados.github.io/moonbeam/>
-- **Source:** <https://github.com/TijanTRados/moonbeam>
+- **Play:** <https://tijantrados.github.io/MoonBeam/>
+- **Source:** <https://github.com/TijanTRados/MoonBeam>
 - Works on phone, tablet and desktop. Installable as a PWA; packaged for Android
   with Capacitor.
 
