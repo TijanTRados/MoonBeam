@@ -5,7 +5,7 @@
       "name": "moonbeam",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "autoPort": false,
+      "autoPort": true,
       "port": 5273
     }
   ]
