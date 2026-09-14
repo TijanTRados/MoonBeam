@@ -13,9 +13,9 @@ The moon shines. You build the path.
 
 ## What it is
 
-The moon drops a beam of light into a grid. You place mirrors, splitters, prisms
-and filters so the light reaches every ring — passing through every star on the
-way. Rings must be hit by **exactly** their colour, so light is a resource to be
+The moon drops a beam of light into a grid. You place mirrors, splitters,
+crystals and tints so the light reaches every ring — passing through every star
+on the way. Rings must be hit by **exactly** their colour, so light is a resource to be
 separated, recombined and spent carefully rather than just aimed.
 
 Every level is generated, verified and difficulty-rated at runtime. There is no
