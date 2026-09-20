@@ -14,8 +14,6 @@ export enum Dir {
   Left = 3,
 }
 
-export const DIRS: readonly Dir[] = [Dir.Down, Dir.Right, Dir.Up, Dir.Left];
-
 /** Unit vector per direction, indexed by Dir. */
 export const DELTA: readonly { x: number; y: number }[] = [
   { x: 0, y: 1 },  // Down
@@ -24,9 +22,6 @@ export const DELTA: readonly { x: number; y: number }[] = [
   { x: -1, y: 0 }, // Left
 ];
 
-export function opposite(d: Dir): Dir {
-  return ((d + 2) % 4) as Dir;
-}
 export function turnCW(d: Dir): Dir {
   return ((d + 1) % 4) as Dir;
 }
@@ -37,8 +32,9 @@ export function turnCCW(d: Dir): Dir {
 /**
  * Light is an additive RGB bitmask rather than the thesis's three discrete
  * colours. White is R|G|B. This is the single biggest depth change to the
- * original rules: filters *subtract* channels and prisms *separate* them, so
- * colour becomes a resource to route rather than a label to match.
+ * original rules: crystals *separate* the channels, tints *convert* between
+ * them, and receptors *accumulate* — so colour becomes a resource to route
+ * rather than a label to match.
  */
 export enum Chan {
   R = 1,
@@ -47,12 +43,6 @@ export enum Chan {
 }
 export type Light = number; // 1..7
 export const WHITE: Light = Chan.R | Chan.G | Chan.B;
-
-export function lightName(l: Light): string {
-  return (
-    { 1: "red", 2: "green", 3: "yellow", 4: "blue", 5: "magenta", 6: "cyan", 7: "white" } as Record<number, string>
-  )[l] ?? "dark";
-}
 
 /** Every kind of thing that can occupy a grid cell. */
 export type TileKind =

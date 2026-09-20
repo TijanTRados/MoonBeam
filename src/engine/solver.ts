@@ -184,11 +184,6 @@ export function solve(level: Level, opts: SolveOpts = {}): SolveResult {
   };
 }
 
-/** Cheap yes/no feasibility check, for the generator's inner loop. */
-export function isSolvable(level: Level, nodeBudget = 12_000): boolean {
-  return solve(level, { firstOnly: true, nodeBudget }).solved;
-}
-
 /**
  * Turn a solve result into a 1-10 difficulty rating.
  *

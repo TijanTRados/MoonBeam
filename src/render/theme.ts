@@ -47,7 +47,14 @@ export const LIGHT_COLOR: Record<number, string> = {
 
 export const lightColor = (l: Light) => LIGHT_COLOR[l] ?? PALETTE.inkDim;
 
-/** Human-readable colour names, used in the tray and the receptor legend. */
+/**
+ * The names players see, used in the tray and the goal line.
+ *
+ * This is the single source of colour names. The engine deliberately has none:
+ * a second table there once said "red"/"magenta" where this one says
+ * "rose"/"orchid", and two tables that disagree about what a colour is called
+ * is exactly how a player ends up hunting for a red ring that was never there.
+ */
 export const LIGHT_LABEL: Record<number, string> = {
   1: "rose", 2: "mint", 3: "amber", 4: "sky", 5: "orchid", 6: "aqua", 7: "moonlight",
 };
