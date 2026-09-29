@@ -220,6 +220,56 @@ static game.
 
 ---
 
+## Making a solve feel like a moment
+
+A light puzzle has a built-in problem: the outcome is decided the instant you
+press Shine, so without care the payoff is a flat "correct". The reveal is
+choreographed so the result is something you watch arrive.
+
+- **The beam plays a tune.** Every piece the light touches rings one step higher
+  on the scale, so a run is heard as a phrase climbing towards its ending.
+- **The crystal shows its hand.** When white light splits, a rainbow bloom opens
+  and a pulse races ahead along every path the separated colours will actually
+  take — through mirrors, round corners, into rings — before the beam gets there.
+- **Time slows at the end.** On a winning run the reveal drops to a crawl for the
+  last stretch, with a rising swell under it, so you watch the light creep into
+  the final ring. The engine knows the solve is coming; the player gets to feel it.
+- **Then everything lands at once.** A crash and a chord, the music ducking out of
+  the way, a shockwave across the board, every beam flaring white, the board
+  leaning towards you, sparks out of every ring — and the collected stars and rings
+  joined up as a constellation, the board's own star map of what you did.
+- **The result says what was special.** Stars pop onto the card one at a time, and
+  badges call out a first-try solve, par, and streaks.
+
+The music is part of it. It runs through its own low-pass filter, which opens as
+the beam travels and is thrown wide at the moment of solving — a single knob that
+makes the whole soundtrack lean in.
+
+All of this is verified frame by frame in `test/reveal.test.ts`: exactly one
+climax on a winning run, landing on the frame the last ring fills, with the
+slow-down strictly before it, and none of it on a losing run.
+
+### Sound and music
+
+Everything is synthesised with the Web Audio API — no audio files. Sound effects
+use the C-major pentatonic, which has no wrong notes against the music, so a chime
+can land on any beat and still sound intended.
+
+The music is an original 16-bar loop in the style of late-90s bubblegum pop:
+bouncy octave bass, a clap on two and four, syncopated chord stabs, and a
+glockenspiel arpeggio doing the sparkle. It borrows the genre's instrumentation,
+not anybody's melody — the hook was written here from its own chord tones. Notes
+are scheduled on the audio clock, not timers, so the groove stays tight while a
+level is generating. Sound and music have separate switches, both remembered.
+
+### Explaining the pieces
+
+Every piece is described in one place (`src/game/info.ts`), which feeds the line
+above the tray, the toast when you tap a level piece, the how-to screen, and a
+card introducing each piece the first time you meet it. Each card carries a small
+live demo — a real level, run by the real engine, drawn by the real renderer — so
+the picture can never contradict the words.
+
 ## Running it
 
 ```bash

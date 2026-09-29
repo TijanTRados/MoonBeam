@@ -6,10 +6,26 @@
  * elements.
  */
 import { Level, Light, Tile, TileKind } from "../engine/types";
-import { SimResult, Outcome, cycleLength, evaluate, simulate } from "../engine/simulate";
+import { SimResult, Outcome, evaluate, simulate } from "../engine/simulate";
 import { poolKey } from "../engine/solver";
 
 export type Phase = "build" | "running" | "won" | "lost";
+
+/** What happened during one frame of the reveal. */
+export interface RevealTick {
+  /** The run has finished drawing. */
+  settled: boolean;
+  /** Cells the light reached this frame, in the order it reached them. */
+  reached: number[];
+  /** This is the frame the solution completed: fire the celebration. */
+  climax: boolean;
+  /** Time is slowed for the final approach. */
+  slowMo: boolean;
+  /** The first frame of the slow-down, so the riser starts exactly once. */
+  slowMoStarted: boolean;
+  /** Seconds the slow-down will last, for timing the riser. */
+  slowMoSeconds: number;
+}
 
 export interface TraySlot {
   key: string;
@@ -34,8 +50,24 @@ export class Game {
   starsLit = new Set<number>();
   outcome: Outcome | null = null;
   hint = new Set<number>();
-  /** Runs used on this level, for the score. */
-  attempts = 0;
+  /** Times Shine has been pressed on this level. One means solved first try. */
+  runs = 0;
+
+  // Reveal bookkeeping, measured in hops from the moon rather than as a fraction,
+  // so speed can be set in hops per second and the slow-down lands exactly.
+  private front = 0;
+  private maxOrder = 0;
+  /** Cell -> first hop light reaches it. */
+  private firstArrival = new Map<number, number>();
+  /**
+   * Cell -> last hop light reaches it. A ring that needs two converging beams is
+   * only complete when the *later* one arrives, so rings fire on this.
+   */
+  private lastArrival = new Map<number, number>();
+  /** The hop at which the final goal is met on a winning run, or -1. */
+  private climaxAt = -1;
+  private climaxFired = false;
+  private slowMoOn = false;
 
   constructor(level: Level) {
     this.load(level);
@@ -64,11 +96,11 @@ export class Game {
       this.tray.push(slot);
     }
     this.selected = 0;
-    this.reset(false);
+    this.runs = 0;
+    this.reset();
   }
 
-  reset(countAttempt = true) {
-    if (countAttempt) this.attempts++;
+  reset() {
     this.board = this.level.tiles.map((t) => ({ ...t }));
     for (const s of this.tray) s.used = 0;
     this.phase = "build";
@@ -147,9 +179,10 @@ export class Game {
 
   /** Start a run. Returns the outcome immediately; the animation catches up. */
   start(): Outcome {
-    this.attempts++;
+    this.runs++;
     this.phase = "running";
     this.reveal = 0;
+    this.front = 0;
     this.tick = 0;
     this.starsLit.clear();
     this.hint.clear();
@@ -159,31 +192,131 @@ export class Game {
     // works rather than an arbitrary frame of the cycle.
     this.tick = this.outcome.winTick >= 0 ? this.outcome.winTick : 0;
     this.sim = simulate(lv, this.tick);
+
+    this.maxOrder = 0;
+    this.firstArrival.clear();
+    this.lastArrival.clear();
+    for (const g of this.sim.segments) {
+      if (g.order > this.maxOrder) this.maxOrder = g.order;
+      if (g.x1 < 0 || g.y1 < 0 || g.x1 >= lv.w || g.y1 >= lv.h) continue;
+      const i = g.y1 * lv.w + g.x1;
+      const f = this.firstArrival.get(i);
+      if (f === undefined || g.order < f) this.firstArrival.set(i, g.order);
+      const l = this.lastArrival.get(i);
+      if (l === undefined || g.order > l) this.lastArrival.set(i, g.order);
+    }
+
+    // On a winning run, the climax is whichever goal completes last: the final
+    // ring to fill, or the final star to be touched.
+    this.climaxAt = -1;
+    this.climaxFired = false;
+    this.slowMoOn = false;
+    if (this.outcome.won) {
+      for (const i of this.sim.satisfied) {
+        this.climaxAt = Math.max(this.climaxAt, this.lastArrival.get(i) ?? 0);
+      }
+      for (const i of this.sim.starsLit) {
+        this.climaxAt = Math.max(this.climaxAt, this.firstArrival.get(i) ?? 0);
+      }
+    }
     return this.outcome;
   }
 
-  /** Advance the reveal animation. `dt` in seconds. Returns true when settled. */
-  advance(dt: number): boolean {
-    if (this.phase !== "running" || !this.sim) return true;
-    const hops = Math.max(1, Math.max(...this.sim.segments.map((s) => s.order), 1));
-    // Roughly constant speed in hops/second, so a long path visibly takes
-    // longer — the original's travelling-ball pacing, which is most of its
-    // charm. Floored so that a beam ricocheting around the whole grid still
-    // resolves in about two and a half seconds instead of twelve.
-    this.reveal += dt * Math.max(0.45, 9 / (hops + 1));
+  /** How far the light has travelled, in hops from the moon. */
+  get frontHops(): number {
+    return this.front;
+  }
+
+  /** Hops at which a beam runs off the edge of the board, for the dissolve sound. */
+  exitOrders(): number[] {
+    if (!this.sim) return [];
+    const { w, h } = this.level;
+    return this.sim.segments
+      .filter((g) => !g.warp && (g.x1 < 0 || g.y1 < 0 || g.x1 >= w || g.y1 >= h))
+      .map((g) => g.order);
+  }
+
+  /** The hop at which a cell's event fires: rings when full, everything else on first touch. */
+  eventOrder(i: number): number | undefined {
+    return this.board[i]?.kind === "receptor" ? this.lastArrival.get(i) : this.firstArrival.get(i);
+  }
+
+  /**
+   * Advance the reveal animation by `dt` seconds.
+   *
+   * Pacing is where the excitement lives. The beam travels at a steady clip,
+   * the original's travelling-ball feel, until on a winning run it is about to
+   * complete the solution. Then time drops to a crawl for the last stretch, so
+   * the player watches the light creep into the final ring, and snaps back to
+   * double speed once the moment has landed.
+   */
+  advance(dt: number): RevealTick {
+    const out: RevealTick = {
+      settled: false, reached: [], climax: false,
+      slowMo: false, slowMoStarted: false, slowMoSeconds: 0,
+    };
+    if (this.phase !== "running" || !this.sim) { out.settled = true; return out; }
+
+    const span = this.maxOrder + 1;
+    // Floored so a beam ricocheting round the whole grid still resolves in a
+    // couple of seconds rather than twelve.
+    const normal = Math.max(9, 0.45 * span);
+    const SLOW = 1.5;     // hops per second on the final approach
+    const WINDOW = 1.6;   // hops of slow motion before the climax
+
+    let speed = normal;
+    if (this.climaxAt >= 0 && !this.climaxFired &&
+        this.front >= this.climaxAt - WINDOW && this.front < this.climaxAt) {
+      speed = SLOW;
+      out.slowMo = true;
+      if (!this.slowMoOn) {
+        this.slowMoOn = true;
+        out.slowMoStarted = true;
+        out.slowMoSeconds = (this.climaxAt - this.front) / SLOW;
+      }
+    } else if (this.climaxFired) {
+      speed = normal * 2.2;
+    }
+
+    const prev = this.front;
+    this.front += speed * dt;
+    // Never overshoot the climax in one frame: land on it, so it fires on time.
+    if (this.climaxAt >= 0 && !this.climaxFired && prev < this.climaxAt && this.front > this.climaxAt) {
+      this.front = this.climaxAt;
+    }
+    this.reveal = this.front / span;
+
+    const hits: [number, number][] = [];
+    for (const i of this.firstArrival.keys()) {
+      const at = this.eventOrder(i);
+      if (at !== undefined && at > prev && at <= this.front) hits.push([at, i]);
+    }
+    hits.sort((a, b) => a[0] - b[0]);
+    out.reached = hits.map((h) => h[1]);
 
     for (const s of this.sim.starsLit) {
-      const seg = this.sim.segments.find((g) => g.x1 + g.y1 * this.level.w === s);
-      if (!seg || seg.order <= this.reveal * (hops + 1)) this.starsLit.add(s);
+      if (this.front >= (this.firstArrival.get(s) ?? 0)) this.starsLit.add(s);
+    }
+
+    if (this.climaxAt >= 0 && !this.climaxFired && this.front >= this.climaxAt) {
+      this.climaxFired = true;
+      out.climax = true;
     }
 
     if (this.reveal >= 1.15) {
       this.reveal = 1.15;
       this.phase = this.outcome?.won ? "won" : "lost";
       if (this.outcome) for (const s of this.outcome.starsLit) this.starsLit.add(s);
-      return true;
+      out.settled = true;
     }
-    return false;
+    return out;
+  }
+
+  /** Cells of collected stars and lit rings, in the order the light found them. */
+  constellation(): number[] {
+    if (!this.sim) return [];
+    const pts = [...this.sim.satisfied, ...this.sim.starsLit];
+    return pts.sort((a, b) => (this.eventOrder(a) ?? 0) - (this.eventOrder(b) ?? 0));
   }
 
   /** Reveal one piece of the known solution that is not already correct. */
@@ -201,7 +334,7 @@ export class Game {
   }
 
   /** Stars earned: one for solving, plus the collectibles banked. */
-  score(): { solved: boolean; stars: number; totalStars: number; par: number; used: number } {
+  score(): { solved: boolean; stars: number; totalStars: number; par: number; used: number; firstTry: boolean } {
     const used = this.tray.reduce((n, s) => n + s.used, 0);
     return {
       solved: this.phase === "won",
@@ -209,11 +342,8 @@ export class Game {
       totalStars: this.outcome?.totalStars ?? 0,
       par: this.level.par ?? 0,
       used,
+      firstTry: this.runs === 1,
     };
-  }
-
-  cycle(): number {
-    return cycleLength(this.level);
   }
 }
 
@@ -229,6 +359,11 @@ export interface Progress {
   /** night -> stars collected. */
   stars: Record<number, number>;
   runSeed: number;
+  /** Nights solved in a row on the first Shine. */
+  streak: number;
+  bestStreak: number;
+  /** Piece kinds the player has been introduced to. */
+  seen: string[];
 }
 
 export function loadProgress(): Progress {
@@ -242,11 +377,14 @@ export function loadProgress(): Progress {
           unlocked: p.unlocked,
           stars: p.stars ?? {},
           runSeed: p.runSeed ?? 1,
+          streak: p.streak ?? 0,
+          bestStreak: p.bestStreak ?? 0,
+          seen: p.seen ?? [],
         };
       }
     }
   } catch { /* private mode, cleared storage, blocked cookies — fall through */ }
-  return { unlocked: 1, stars: {}, runSeed: 1 };
+  return { unlocked: 1, stars: {}, runSeed: 1, streak: 0, bestStreak: 0, seen: [] };
 }
 
 export function saveProgress(p: Progress) {
