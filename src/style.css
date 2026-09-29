@@ -172,6 +172,11 @@ body { -webkit-user-select: none; user-select: none; touch-action: manipulation;
 .bar-title { flex: 1; min-width: 0; text-align: center; }
 .bar-spacer { width: var(--tap); flex: none; }
 
+/* The header holds two round buttons on the right now, so give them room to
+   breathe without squeezing the level name on a narrow phone. */
+.bar .icon-btn + .icon-btn { margin-left: -2px; }
+.bar [data-action="mute"] { font-size: 17px; }
+
 .meta {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   margin-top: 3px;
