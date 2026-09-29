@@ -10,6 +10,9 @@ import { simulate } from "./engine/simulate";
 import { Game, loadProgress, saveProgress, Progress } from "./game/state";
 import { cellAt, computeLayout, draw, drawIcon, ViewState } from "./render/renderer";
 import { clearFx, spawnFx } from "./render/fx";
+import {
+  isMuted, sfxMiss, sfxPlace, sfxRemove, sfxRing, sfxRotate, sfxShine, sfxStar, sfxWin, toggleMuted,
+} from "./audio";
 import { LIGHT_LABEL } from "./render/theme";
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
@@ -67,7 +70,12 @@ function frame(now: number) {
       const settled = game.advance(dt);
       // A star sparks the moment the light actually gets to it.
       for (const s of game.starsLit) {
-        if (!before.has(s)) spawnFx(s, "star", now / 1000);
+        if (!before.has(s)) {
+          spawnFx(s, "star", now / 1000);
+          // Index by how many are already banked, so each star in a level is a
+          // step further up the scale.
+          sfxStar(before.size);
+        }
       }
       if (settled) onSettled();
     }
@@ -162,6 +170,9 @@ canvas.addEventListener("pointerdown", (e) => {
     buzz(r === "removed" ? 8 : 12);
     spawnFx(i, r === "placed" ? "place" : r === "rotated" ? "rotate" : "remove",
             performance.now() / 1000);
+    if (r === "placed") sfxPlace();
+    else if (r === "rotated") sfxRotate();
+    else sfxRemove();
     renderTray();
   }
 });
@@ -285,8 +296,10 @@ function onSettled() {
       let n = 0;
       for (const i of game.sim.satisfied) {
         spawnFx(i, "ring", now() + n * 0.09, game.sim.receptorLight.get(i) ?? 7);
+        window.setTimeout(sfxRing, n * 90);
         n++;
       }
+      window.setTimeout(sfxWin, Math.max(240, n * 90 + 120));
     }
     const s = game.score();
     const earned = 1 + s.stars;
@@ -299,6 +312,7 @@ function onSettled() {
     showWin(s);
   } else {
     const o = game.outcome;
+    sfxMiss();
     const msg = !o || o.satisfiedCount === 0
       ? "The light never arrived."
       : o.satisfiedCount < o.totalReceptors
@@ -406,12 +420,14 @@ document.addEventListener("click", (e) => {
     case "endless": endlessSeed = Date.now() >>> 0; startLevel(1, true); break;
     case "home": show("title"); break;
     case "howto": renderHowto(); $("#howto").hidden = false; break;
+    case "mute": toggleMuted(); renderMute(); break;
     case "close-howto": $("#howto").hidden = true; break;
 
     case "run": {
       if (!game || game.phase === "running") return;
       if (game.phase === "won") return;
       if (game.remaining > 0) toast(`${game.remaining} piece(s) still in the tray`, 1500);
+      sfxShine();
       game.start();
       break;
     }
@@ -439,6 +455,15 @@ document.addEventListener("keydown", (e) => {
 
 // ---------------------------------------------------------------- boot
 
+function renderMute() {
+  const b = $("[data-action=mute]");
+  const off = isMuted();
+  b.textContent = off ? "🔇" : "🔊";
+  b.setAttribute("aria-label", off ? "Unmute" : "Mute");
+  b.setAttribute("aria-pressed", String(off));
+}
+
+renderMute();
 show("title");
 requestAnimationFrame(frame);
 
