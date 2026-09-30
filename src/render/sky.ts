@@ -10,7 +10,8 @@
  * The rule for all of it: the board is the subject. Planets are small and dim,
  * satellites are specks, and nothing in the sky is brighter than a beam.
  */
-import { PALETTE as P, alpha } from "./theme";
+import { alpha } from "./theme";
+import { CONSTELLATIONS, DEFAULT_THEME, PlanetLook, Theme } from "./themes";
 
 interface SkyStar {
   x: number; y: number;       // 0..1
@@ -64,9 +65,29 @@ export interface SkyOpts {
    * the puzzle.
    */
   avoid?: { x: number; y: number; w: number; h: number };
+  /** The phase's look: sky colours, its planet, its constellations. */
+  theme?: Theme;
+  /**
+   * Where the moon hangs. Planets stay well clear of it: a dim round body
+   * drifting past the dark side of a crescent reads as the rest of the moon,
+   * and the moon is meant to be only what is lit.
+   */
+  moons?: { x: number; y: number; r: number }[];
 }
 
 let avoidRect: SkyOpts["avoid"] = undefined;
+let moonSpots: NonNullable<SkyOpts["moons"]> = [];
+
+/** 1 well away from the moon, fading to nothing as a body drifts up to it. */
+function moonClearance(x: number, y: number, r: number) {
+  let k = 1;
+  for (const m of moonSpots) {
+    const d = Math.hypot(x - m.x, y - m.y) - r;
+    const near = m.r * 2.2, far = m.r * 4;
+    k = Math.min(k, Math.max(0, Math.min(1, (d - near) / (far - near))));
+  }
+  return k;
+}
 
 /** 1 in open sky, fading to 0.1 as a point moves in behind the board. */
 function clearance(x: number, y: number, margin = 14) {
@@ -81,32 +102,225 @@ function clearance(x: number, y: number, margin = 14) {
 }
 
 export function drawSky(ctx: CanvasRenderingContext2D, w: number, h: number, time: number, opts: SkyOpts = {}) {
-  // Base: a deep gradient, lighter near the moon at the top.
+  const th = opts.theme ?? DEFAULT_THEME;
+  // Base: a deep gradient in the phase's colours, lighter near the moon.
   const g = ctx.createRadialGradient(w * 0.5, h * 0.16, 0, w * 0.5, h * 0.55, Math.max(w, h) * 0.9);
-  g.addColorStop(0, P.nightSoft);
-  g.addColorStop(0.5, P.nightMid);
-  g.addColorStop(1, P.nightDeep);
+  g.addColorStop(0, th.sky[0]);
+  g.addColorStop(0.5, th.sky[1]);
+  g.addColorStop(1, th.sky[2]);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
   avoidRect = opts.avoid;
+  moonSpots = opts.moons ?? [];
 
-  if (!opts.mini) drawNebula(ctx, w, h, time);
+  if (!opts.mini) drawNebula(ctx, w, h, time, th.nebula);
   drawStars(ctx, w, h, time);
   if (opts.mini) return;
+  drawConstellations(ctx, w, h, time, th.constellations);
+  drawBigPlanet(ctx, w, h, time, th.planet);
   drawSparkleBursts(ctx, w, h, time);
   drawOrrery(ctx, w, h, time);
   drawSatellites(ctx, w, h, time);
   drawShootingStars(ctx, w, h, time);
 }
 
+// ---------------------------------------------------------------- constellations
+
+/**
+ * Two real constellations per phase, drawn as faint lines between brighter
+ * stars. They breathe slowly — lines fading up and down on a long cycle — and
+ * carry their name in tiny letters, because recognising the Plough in a
+ * puzzle game's sky is exactly the kind of small delight this is for.
+ */
+function drawConstellations(ctx: CanvasRenderingContext2D, w: number, h: number, t: number, names: string[]) {
+  const S = Math.min(w, h);
+  // Two fixed homes: upper left and right of centre, clear of the moon.
+  const homes: [number, number, number][] = [[0.06, 0.08, 0.26], [0.7, 0.3, 0.24]];
+  names.slice(0, 2).forEach((name, k) => {
+    const c = CONSTELLATIONS[name];
+    if (!c) return;
+    const [hx, hy, size] = homes[k];
+    const box = S * size;
+    const ox = hx * w, oy = hy * h;
+    const pts = c.stars.map(([x, y]) => [ox + x * box, oy + y * box * 0.8] as [number, number]);
+    const breathe = 0.55 + 0.45 * Math.sin(t * 0.18 + k * 2.4);
+
+    ctx.lineWidth = 1;
+    ctx.lineCap = "round";
+    for (const [a, b] of c.lines) {
+      const mid = clearance((pts[a][0] + pts[b][0]) / 2, (pts[a][1] + pts[b][1]) / 2, 20);
+      ctx.strokeStyle = alpha("#cfd8ff", 0.16 * breathe * mid);
+      ctx.beginPath(); ctx.moveTo(pts[a][0], pts[a][1]); ctx.lineTo(pts[b][0], pts[b][1]); ctx.stroke();
+    }
+    pts.forEach(([x, y], n) => {
+      const seen = clearance(x, y, 20);
+      const tw = 0.6 + 0.4 * Math.sin(t * (1.1 + n * 0.17) + n + k);
+      ctx.fillStyle = alpha("#fff6e0", 0.75 * tw * seen);
+      ctx.beginPath(); ctx.arc(x, y, 1.6, 0, Math.PI * 2); ctx.fill();
+      if (tw > 0.9) glint(ctx, x, y, 6 * seen, 0.5 * seen, "#fff6e0");
+    });
+    const [lx, ly] = pts.reduce(([ax, ay], [x, y]) => [Math.min(ax, x), Math.max(ay, y)], [Infinity, -Infinity]);
+    const labelSeen = clearance(lx, ly + 12, 20);
+    ctx.fillStyle = alpha("#cfd8ff", 0.22 * breathe * labelSeen);
+    ctx.font = "10px Nunito, system-ui, sans-serif";
+    ctx.fillText(c.name, lx, ly + 14);
+  });
+}
+
+// ---------------------------------------------------------------- the phase's planet
+
+/**
+ * The world you are visiting, huge and low in the corner: mostly off-screen,
+ * just a curve of it rising behind everything. Large enough to set the mood of
+ * a phase at a glance; dim and far enough out of the way never to be mistaken
+ * for part of the puzzle.
+ */
+function drawBigPlanet(ctx: CanvasRenderingContext2D, w: number, h: number, t: number, look: PlanetLook) {
+  const S = Math.min(w, h);
+  const R = S * 0.46;
+  const cx = w * 0.04, cy = h + R * 0.32;
+  const [base, shade, hi] = look.body;
+
+  ctx.save();
+  ctx.globalAlpha = 0.62;
+  ctx.translate(cx, cy);
+
+  if (look.kind === "blackhole") {
+    drawBlackHole(ctx, R * 0.7, t, look);
+    ctx.restore();
+    return;
+  }
+
+  // Rings behind the body.
+  if (look.kind === "saturn" || look.kind === "uranus") {
+    ctx.save();
+    ctx.rotate(look.kind === "uranus" ? -1.35 : -0.35);
+    ctx.strokeStyle = alpha(hi, 0.45);
+    ctx.lineWidth = R * 0.07;
+    ctx.beginPath(); ctx.ellipse(0, 0, R * 1.7, R * 0.42, 0, Math.PI, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  // Atmosphere halo.
+  const halo = ctx.createRadialGradient(0, 0, R * 0.95, 0, 0, R * 1.18);
+  halo.addColorStop(0, alpha(base, 0.35));
+  halo.addColorStop(1, alpha(base, 0));
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(0, 0, R * 1.18, 0, Math.PI * 2); ctx.fill();
+
+  // The disc, lit from the upper right where the moon is.
+  ctx.save();
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.clip();
+  const body = ctx.createRadialGradient(R * 0.35, -R * 0.45, R * 0.1, 0, 0, R * 1.1);
+  body.addColorStop(0, base);
+  body.addColorStop(1, shade);
+  ctx.fillStyle = body;
+  ctx.fillRect(-R, -R, R * 2, R * 2);
+
+  const spin = t * 0.004;
+  switch (look.kind) {
+    case "earth": {
+      ctx.fillStyle = alpha(hi, 0.6);
+      for (const [x, y, rx, ry] of [[-0.3, -0.35, 0.28, 0.18], [0.25, -0.1, 0.22, 0.3], [-0.1, 0.35, 0.3, 0.14]]) {
+        const sx = ((x + spin + 1.3) % 2.6) - 1.3;
+        ctx.beginPath(); ctx.ellipse(sx * R, y * R, rx * R, ry * R, 0.4, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.strokeStyle = alpha("#ffffff", 0.35);
+      ctx.lineWidth = R * 0.04;
+      for (let k = 0; k < 4; k++) {
+        ctx.beginPath();
+        ctx.arc(((k * 0.6 + spin * 1.6) % 2.4 - 1.2) * R, (k * 0.3 - 0.5) * R, R * 0.3, 0.2, 1.4);
+        ctx.stroke();
+      }
+      break;
+    }
+    case "venus":
+    case "jupiter":
+    case "saturn":
+    case "neptune":
+    case "uranus": {
+      // Bands of cloud, drifting.
+      const n = look.kind === "jupiter" ? 9 : 6;
+      for (let k = 0; k < n; k++) {
+        const y = (-1 + (2 * (k + 0.5)) / n) * R;
+        ctx.fillStyle = alpha(k % 2 ? hi : shade, look.kind === "jupiter" ? 0.3 : 0.14);
+        ctx.beginPath();
+        ctx.ellipse(Math.sin(spin * 8 + k) * R * 0.05, y, R * 1.1, R / n * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (look.kind === "jupiter") {
+        ctx.fillStyle = alpha("#c0462a", 0.55);
+        ctx.beginPath(); ctx.ellipse(R * 0.25, R * 0.22, R * 0.16, R * 0.09, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      if (look.kind === "neptune") {
+        ctx.fillStyle = alpha("#081a50", 0.5);
+        ctx.beginPath(); ctx.ellipse(R * 0.1, -R * 0.2, R * 0.14, R * 0.07, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      break;
+    }
+    case "mercury": {
+      ctx.fillStyle = alpha(shade, 0.35);
+      for (const [x, y, r] of [[-0.3, -0.4, 0.14], [0.3, -0.2, 0.1], [0, 0.2, 0.18], [0.45, 0.35, 0.08], [-0.5, 0.1, 0.1]]) {
+        ctx.beginPath(); ctx.arc(x * R, y * R, r * R, 0, Math.PI * 2); ctx.fill();
+      }
+      break;
+    }
+    case "mars": {
+      ctx.fillStyle = alpha(shade, 0.35);
+      for (const [x, y, rx, ry] of [[-0.2, 0, 0.35, 0.12], [0.3, 0.3, 0.2, 0.1]]) {
+        ctx.beginPath(); ctx.ellipse(x * R, y * R, rx * R, ry * R, 0.3, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = alpha(hi, 0.75);
+      ctx.beginPath(); ctx.ellipse(R * 0.1, -R * 0.9, R * 0.35, R * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+  }
+  ctx.restore();
+
+  // Rings in front of the body.
+  if (look.kind === "saturn" || look.kind === "uranus") {
+    ctx.save();
+    ctx.rotate(look.kind === "uranus" ? -1.35 : -0.35);
+    ctx.strokeStyle = alpha(hi, 0.6);
+    ctx.lineWidth = R * 0.07;
+    ctx.beginPath(); ctx.ellipse(0, 0, R * 1.7, R * 0.42, 0, 0, Math.PI); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/** The last world is not a world: an accretion disc round a hole in the sky. */
+function drawBlackHole(ctx: CanvasRenderingContext2D, R: number, t: number, look: PlanetLook) {
+  const [disc, , hot] = look.body;
+  ctx.save();
+  ctx.rotate(-0.3);
+  // The disc, spinning; the far side lensed up over the top of the hole.
+  for (let k = 0; k < 3; k++) {
+    ctx.strokeStyle = alpha(k === 0 ? hot : disc, 0.5 - k * 0.12);
+    ctx.lineWidth = R * (0.14 - k * 0.03);
+    ctx.setLineDash([R * 0.3, R * 0.12]);
+    ctx.lineDashOffset = -t * R * 0.25 * (k + 1);
+    ctx.beginPath(); ctx.ellipse(0, 0, R * (2 - k * 0.25), R * (0.45 - k * 0.06), 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  const lens = ctx.createRadialGradient(0, 0, R * 0.9, 0, 0, R * 1.35);
+  lens.addColorStop(0, alpha(hot, 0.7));
+  lens.addColorStop(1, alpha(hot, 0));
+  ctx.fillStyle = lens;
+  ctx.beginPath(); ctx.arc(0, 0, R * 1.35, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#000000";
+  ctx.beginPath(); ctx.arc(0, 0, R * 0.95, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
 // ---------------------------------------------------------------- nebula
 
-function drawNebula(ctx: CanvasRenderingContext2D, w: number, h: number, t: number) {
+function drawNebula(ctx: CanvasRenderingContext2D, w: number, h: number, t: number, tints: [string, string]) {
   // Two soft clouds drifting on long loops. Barely there; they stop the black
-  // from reading as flat.
+  // from reading as flat, and carry most of a phase's colour.
   const clouds = [
-    { x: 0.2 + 0.05 * Math.sin(t * 0.021), y: 0.72, r: 0.55, c: "#6b3fa0", a: 0.10 },
-    { x: 0.85 + 0.04 * Math.cos(t * 0.017), y: 0.3, r: 0.45, c: "#2f6f8f", a: 0.08 },
+    { x: 0.2 + 0.05 * Math.sin(t * 0.021), y: 0.72, r: 0.55, c: tints[0], a: 0.12 },
+    { x: 0.85 + 0.04 * Math.cos(t * 0.017), y: 0.3, r: 0.45, c: tints[1], a: 0.09 },
   ];
   for (const k of clouds) {
     const R = Math.max(w, h) * k.r;
@@ -234,7 +448,8 @@ function drawOrrery(ctx: CanvasRenderingContext2D, w: number, h: number, t: numb
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(-tilt);
-    ctx.globalAlpha = (0.45 + 0.3 * depth) * clearance(sx, sy, r * 3);
+    ctx.globalAlpha = (0.45 + 0.3 * depth) * clearance(sx, sy, r * 3) * moonClearance(sx, sy, r);
+    if (ctx.globalAlpha < 0.01) { ctx.restore(); continue; }
     drawPlanet(ctx, r, p);
     ctx.restore();
   }

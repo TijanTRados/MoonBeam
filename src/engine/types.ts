@@ -83,6 +83,32 @@ export type TileKind =
   | "blackhole"
   /** Where a black hole's light comes back out. Otherwise transparent. */
   | "whitehole"
+  /**
+   * Asteroid: drifts along a track and breaks any beam that hits it. Hitting one
+   * costs points, and because light takes time to cross the board, whether it
+   * is in the way depends on the moment you fire.
+   */
+  | "asteroid"
+  /**
+   * Satellite: catches light and carries it to its dish, which releases it
+   * `delay` ticks later still travelling the same way. The delay is the point:
+   * by the time the light comes back down, asteroids have moved.
+   */
+  | "satellite"
+  /** Where a satellite puts its light back down. Otherwise transparent. */
+  | "dish"
+  /**
+   * One piece of a shooting star. The pieces form a sequence (`seq` 0, 1, 2 …)
+   * and only the active one can be collected: light must reach piece 0, and
+   * then — later in the same firing — piece 1, and so on. Light passing a piece
+   * before its turn does nothing. Transparent, like a star.
+   */
+  | "comet"
+  /**
+   * Rough ground. Light crosses it freely, but nothing can be built on it — it
+   * takes building spots away without taking routes away.
+   */
+  | "terrain"
   /** Collectible. Light passes straight through; lighting it banks it permanently. */
   | "star"
   /** Goal. Must be hit by light matching `mask` exactly. */
@@ -94,7 +120,7 @@ export interface Tile {
   mask?: Light;
   /** For `tint`: only convert light of exactly this colour. Unset means "any". */
   from?: Light;
-  /** Pairing id for `portal`, and for `blackhole`/`whitehole`. */
+  /** Pairing id for `portal`, `blackhole`/`whitehole` and `satellite`/`dish`. */
   pair?: number;
   /**
    * Set on tiles the player placed this session, so we can render them
@@ -107,6 +133,22 @@ export interface Tile {
    */
   track?: { x: number; y: number }[];
   phase?: number;
+  /** For `satellite`: ticks of board time it holds the light before its dish releases it. */
+  delay?: number;
+  /** For `comet`: this piece's place in the shooting star's sequence, from 0. */
+  seq?: number;
+}
+
+/**
+ * An edge warp: one row or column whose two ends are joined. Light leaving the
+ * board through one gate comes back in through the gate at the other end,
+ * still travelling the same way — a tunnel under the board.
+ */
+export interface Warp {
+  axis: "row" | "col";
+  index: number;
+  /** Which of the warp colours marks this pair of gates. Decoration only. */
+  hue: number;
 }
 
 /** A piece in the player's tray, with a count. */
@@ -147,6 +189,13 @@ export interface Level {
    * having to solve anything at runtime.
    */
   solution?: { i: number; kind: TileKind; mask?: Light; from?: Light }[];
+  /** Rows and columns that wrap round. */
+  warps?: Warp[];
+  /**
+   * Cells covered by a galaxy. Not a piece — pieces can sit on it — but light
+   * crossing it shines brighter and carries more points.
+   */
+  galaxy?: number[];
 }
 
 export const idx = (l: { w: number }, x: number, y: number) => y * l.w + x;

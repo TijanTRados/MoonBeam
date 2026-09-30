@@ -7,20 +7,27 @@
 import "./style.css";
 import { Level, Light, TileKind, WHITE, tileFrom } from "./engine/types";
 import { generateCampaignLevel, campaignDifficulty, generateLevel } from "./engine/generate";
-import { Segment, SimResult, simulate } from "./engine/simulate";
+import { Segment, SimResult, evaluate, simulate } from "./engine/simulate";
+import { PHASES, Phase as World, PhaseKey, phaseFor } from "./engine/phases";
 import { Game, loadProgress, saveProgress, Progress, RevealTick } from "./game/state";
 import { INFO, PieceKey, demoLevel, describe, infoKey, kindsIn } from "./game/info";
+import { bonuses } from "./game/score";
+import { TOOLS, TOOL_TIPS, sandboxLevel, sandboxTap } from "./game/sandbox";
 import { cellAt, computeLayout, draw, drawIcon, frontOf } from "./render/renderer";
-import { PathSeg, clearFx, spawnFx } from "./render/fx";
+import { PathSeg, clearFx, spawnFx, spawnFxAt } from "./render/fx";
 import { Particles, rand } from "./render/particles";
 import { LIGHT_LABEL } from "./render/theme";
+import { DEFAULT_THEME, THEMES, Theme } from "./render/themes";
+import { moonForNight, moonPath } from "./render/moon";
+import { WARP_HUES } from "./render/elements";
 import {
   isMuted, isMusicMuted, musicBrightness, musicDuck,
-  sfxCardStar, sfxClimax, sfxDissolve, sfxHint, sfxHit, sfxInfo, sfxMiss, sfxPlace,
-  sfxRemove, sfxRing, sfxRiser, sfxRotate, sfxSelect, sfxShine, sfxStar, sfxWhoosh,
+  sfxAsteroid, sfxCardStar, sfxClimax, sfxComet, sfxDissolve, sfxHint, sfxHit, sfxInfo, sfxMiss,
+  sfxNewWorld, sfxPlace, sfxPointTick, sfxPoints, sfxRemove, sfxRing, sfxRiser, sfxRotate,
+  sfxSatelliteDown, sfxSatelliteUp, sfxSelect, sfxShine, sfxStar, sfxWarp, sfxWhoosh,
   sfxWrongRing, toggleMusicMuted, toggleMuted,
 } from "./audio";
-import { isMusicPlaying, startMusic, stopMusic } from "./music";
+import { isMusicPlaying, setSong, startMusic, stopMusic } from "./music";
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 const $$ = (sel: string) => [...document.querySelectorAll(sel)] as HTMLElement[];
@@ -30,6 +37,13 @@ let game: Game | null = null;
 let night = 1;
 let endless = false;
 let endlessSeed = Date.now() >>> 0;
+/** In the Galaxy: everything placeable, nothing recorded. */
+let sandbox = false;
+let toolSel = 0;
+
+/** The current world's look, and how full its moon is tonight. */
+let theme: Theme = DEFAULT_THEME;
+let moonLit = 0.35;
 
 const now = () => performance.now() / 1000;
 
@@ -85,16 +99,25 @@ function frame(nowMs: number) {
     const { w, h, dpr } = fitCanvas(canvas);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    game.tickClock(dt);
     if (game.phase === "running") handleReveal(game.advance(dt), t);
+    for (const [k, v] of gateFlash) {
+      if (v <= dt * 2.5) gateFlash.delete(k); else gateFlash.set(k, v - dt * 2.5);
+    }
+    renderScore();
 
     const celebrating = game.phase === "won" || climaxed;
     winGlow = celebrating ? Math.min(1, winGlow + dt * 2.4) : Math.max(0, winGlow - dt * 2.4);
     flare = Math.max(0, flare - dt * 1.1);
     punch = Math.max(0, punch - dt * 3.2);
 
-    // While building, silently simulate the board as it stands, so crystals can
-    // show where their colours will go before the player commits to a run.
-    const preview: SimResult | null = game.phase === "build" ? simulate(game.current(), 0) : null;
+    // While building, silently simulate the board as it stands — at the moment
+    // Shine would fire — so crystals can show where their colours will go
+    // before the player commits to a run.
+    const preview: SimResult | null = game.phase === "build" ? simulate(game.current(), game.fireTick) : null;
+    const front = game.frontHops;
+    const cometCollected = game.sim && game.phase !== "build"
+      ? game.sim.cometHits.filter((c) => c.order <= front).length : 0;
 
     draw(ctx, w, h, {
       level: game.current(),
@@ -111,6 +134,11 @@ function frame(nowMs: number) {
       flare,
       punch,
       previewSim: preview,
+      clock: game.displayClock,
+      moonLit,
+      theme,
+      cometCollected,
+      gateFlash,
     });
   }
 
@@ -126,18 +154,34 @@ let rung = 2;
 let climaxed = false;
 let climaxCell = -1;
 let exitOrders: number[] = [];
+let gates: ReturnType<Game["gateCrossings"]> = [];
+let carries: ReturnType<Game["carries"]> = [];
 let lastDissolve = 0;
+let lastWarp = 0;
+let lastPointTick = 0;
+let pointTicks = 0;
+/** How far the light had got at the end of the previous frame, in hops. */
+let lastFront = 0;
+/** Warp gates flashing as light passes through them: "axis:index" -> 0..1. */
+const gateFlash = new Map<string, number>();
 
 function beginRun() {
   if (!game) return;
   rung = 2;
   climaxed = false;
   climaxCell = -1;
+  lastFront = 0;
+  pointTicks = 0;
   sfxShine();
   musicBrightness(0.62, 0.6);
   game.start();
   exitOrders = game.exitOrders();
+  gates = game.gateCrossings();
+  carries = game.carries();
 }
+
+/** Things the reveal handles through their own events rather than on touch. */
+const QUIET_ON_TOUCH = new Set(["comet", "asteroid", "satellite", "dish", "terrain"]);
 
 /**
  * React to what the light reached this frame.
@@ -153,7 +197,7 @@ function handleReveal(tick: RevealTick, t: number) {
 
   for (const i of tick.reached) {
     const kind = board[i]?.kind;
-    if (!kind || kind === "empty") continue;
+    if (!kind || kind === "empty" || QUIET_ON_TOUCH.has(kind)) continue;
     climaxCell = i;
 
     if (kind === "star") {
@@ -180,8 +224,35 @@ function handleReveal(tick: RevealTick, t: number) {
     }
   }
 
+  handleEvents(tick, t);
+
   // Light fizzing off the edge of the board.
   const f = game.frontHops;
+  const prev = lastFront;
+  lastFront = f;
+
+  // Through a warp gate: a hollow whoosh and a flash in the gate's colour.
+  const w = game.level.w, h = game.level.h;
+  for (const g of gates) {
+    if (g.order <= prev || g.order > f) continue;
+    const row = g.x < 0 || g.x >= w;
+    const warp = game.level.warps?.find((wp) => wp.axis === (row ? "row" : "col") && wp.index === (row ? g.y : g.x));
+    const hue = warp?.hue ?? 0;
+    const at = { x: Math.max(-0.62, Math.min(w - 0.38, g.x)), y: Math.max(-0.62, Math.min(h - 0.38, g.y)) };
+    spawnFxAt(at.x, at.y, "warpFlash", t, { color: WARP_HUES[hue % WARP_HUES.length] });
+    if (warp) gateFlash.set(`${warp.axis}:${warp.index}`, 1);
+    if (t - lastWarp > 0.25) { sfxWarp(hue); lastWarp = t; }
+  }
+
+  // A satellite picking the light up, and its dish putting it down.
+  for (const c of carries) {
+    if (c.from > prev && c.from <= f) sfxSatelliteUp();
+    if (c.to > prev && c.to <= f) {
+      sfxSatelliteDown();
+      spawnFxAt(c.x1, c.y1, "warpFlash", t, { color: "#bff4ff" });
+    }
+  }
+
   for (const o of exitOrders) {
     if (o > f - 0.3 && o <= f && t - lastDissolve > 0.14) {
       sfxDissolve();
@@ -195,6 +266,94 @@ function handleReveal(tick: RevealTick, t: number) {
   }
   if (tick.climax) celebrate(t);
   if (tick.settled) onSettled();
+}
+
+/**
+ * Points as the light earns them: a number floating up off each thing that
+ * scores, a chime for the big ones, and a soft tick for the travel itself.
+ */
+function handleEvents(tick: RevealTick, t: number) {
+  if (!game) return;
+  const w = game.level.w;
+  const pos = (i: number) => ({ x: i % w, y: Math.floor(i / w) });
+  let evPoints = 0;
+
+  for (const e of tick.events) {
+    evPoints += e.points;
+    const p = pos(e.cell);
+    const label = `${e.points > 0 ? "+" : "−"}${Math.abs(e.points)}`;
+    switch (e.kind) {
+      case "galaxy":
+        spawnFxAt(p.x, p.y, "points", t, { text: label, color: "#ffb3f0" });
+        sparkle(e.cell, 3, "#ffc8f4");
+        if (t - lastPointTick > 0.05) { sfxPointTick(pointTicks++, true); lastPointTick = t; }
+        break;
+      case "star":
+        spawnFxAt(p.x, p.y, "points", t + 0.1, { text: label, color: "#ffe066" });
+        break;
+      case "ring":
+        spawnFxAt(p.x, p.y, "points", t + 0.15, { text: label, color: "#fff3d6" });
+        sfxPoints(true);
+        break;
+      case "asteroid":
+        spawnFx(e.cell, "shatter", t, game.sim?.segments.find((s) => s.x1 === p.x && s.y1 === p.y)?.light ?? WHITE);
+        spawnFxAt(p.x, p.y, "points", t + 0.05, { text: label, color: "#ff8a7a" });
+        sfxAsteroid();
+        buzz([30, 20, 30]);
+        break;
+      case "comet": {
+        spawnFxAt(p.x, p.y, "points", t + 0.1, { text: label, color: "#bff4ff" });
+        sfxComet(e.seq ?? 0, !!e.last);
+        const next = game.current().tiles.findIndex((tl) => tl.kind === "comet" && tl.seq === (e.seq ?? 0) + 1);
+        if (next >= 0) {
+          spawnFxAt(p.x, p.y, "cometLeap", t, { to: pos(next) });
+        } else if (e.last) {
+          fountain(e.cell, 22, "#bff4ff", 1.5);
+          toast("Shooting star caught!", 1800);
+        }
+        sparkle(e.cell, 8, "#bff4ff");
+        break;
+      }
+    }
+  }
+
+  // The plain travel points: a quiet tick, rising, a few times a second.
+  if (tick.points - evPoints > 0 && t - lastPointTick > 0.09) {
+    sfxPointTick(pointTicks++, false);
+    lastPointTick = t;
+  }
+}
+
+/** A few sparks twinkling around a cell. */
+function sparkle(i: number, n: number, color: string) {
+  if (!game) return;
+  const w = game.level.w;
+  const x = (i % w) + 0.5, y = Math.floor(i / w) + 0.5;
+  const t = now();
+  for (let k = 0; k < n; k++) {
+    const a = rand(0, Math.PI * 2);
+    const sp = rand(0.2, 0.9);
+    boardFx.add({
+      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 0,
+      born: t, life: rand(0.4, 0.9), size: rand(0.015, 0.035), color,
+      glint: true, twinkle: Math.random() * 6,
+    });
+  }
+}
+
+/** The points counter over the board. */
+function renderScore() {
+  const el = $("#score");
+  if (!game || (game.phase === "build" && !game.runScore)) { el.hidden = true; return; }
+  el.hidden = false;
+  const v = game.runScore;
+  const txt = `✦ ${v}`;
+  if (el.textContent !== txt) {
+    el.textContent = txt;
+    el.classList.remove("bump");
+    void el.offsetWidth;
+    el.classList.add("bump");
+  }
 }
 
 /**
@@ -268,14 +427,27 @@ function downstreamFrom(segs: Segment[], cell: number, w: number): PathSeg[] {
 
 function onSettled() {
   if (!game) return;
+  if (sandbox) {
+    // The Galaxy keeps no score card: just say what that run was worth.
+    if (game.phase === "won" && !climaxed && game.sim?.satisfied.size) celebrate(now());
+    const pts = game.constellation();
+    if (game.phase === "won" && pts.length >= 2) spawnFx(pts[0], "constellation", now(), WHITE, { points: pts });
+    toast(`${game.phase === "won" && game.sim?.satisfied.size ? "Solved! " : ""}✦ ${game.runScore} points`, 2400);
+    if (game.phase !== "won") sfxMiss();
+    return;
+  }
   if (game.phase === "won") {
     if (!climaxed) celebrate(now());
     const s = game.score();
     const earned = 1 + s.stars;
     const firstTry = s.firstTry;
+    const total = s.points + bonuses(s.used, s.par, s.firstTry).reduce((n, b) => n + b.points, 0);
+    let newBest = false;
     if (!endless) {
       progress.stars[night] = Math.max(progress.stars[night] ?? 0, earned);
       progress.unlocked = Math.max(progress.unlocked, night + 1);
+      newBest = total > (progress.best[night] ?? -Infinity);
+      if (newBest) progress.best[night] = total;
     }
     progress.streak = firstTry ? progress.streak + 1 : 0;
     progress.bestStreak = Math.max(progress.bestStreak, progress.streak);
@@ -285,19 +457,25 @@ function onSettled() {
     // the board has had a moment to itself.
     const pts = game.constellation();
     if (pts.length >= 2) spawnFx(pts[0], "constellation", now(), WHITE, { points: pts });
-    window.setTimeout(() => showWin(s), 900);
+    window.setTimeout(() => showWin(s, total, newBest), 900);
   } else {
     const o = game.outcome;
+    const sim = game.sim;
     sfxMiss();
     musicBrightness(0.35, 1.2);
-    const msg = !o || o.satisfiedCount === 0
-      ? "The light never arrived."
+    const smashed = (sim?.asteroidsHit.size ?? 0) > 0;
+    let msg = !o || o.satisfiedCount === 0
+      ? smashed ? "An asteroid broke the light." : "The light never arrived."
       : o.satisfiedCount < o.totalReceptors
         ? `${o.satisfiedCount} of ${o.totalReceptors} rings lit.`
         : o.starsLit.size < o.totalStars
           ? `Rings lit, but ${o.totalStars - o.starsLit.size} star(s) missed.`
-          : "Not quite.";
-    toast(msg, 2400);
+          : sim && sim.cometTotal > sim.cometHits.length
+            ? `Rings lit, but the shooting star got away (${sim.cometHits.length} of ${sim.cometTotal}).`
+            : "Not quite.";
+    // With things moving, the same board may win at a different moment.
+    if (game.moving && evaluate(game.current()).won) msg += " The pieces are right — try another moment!";
+    toast(msg, 3200);
   }
 }
 
@@ -335,7 +513,7 @@ function drawTitleArt(t: number, dt: number) {
   draw(titleCtx, w, h, {
     level: titleLevel, sim: titleSim, tick: 0, reveal: 1,
     starsLit: titleStars, hover: -1, time: t, winGlow: 0, hint: EMPTY,
-    particles: titleFx, dt,
+    particles: titleFx, dt, moonLit: 0.3,
   });
   titleCtx.globalAlpha = 1;
 }
@@ -386,11 +564,14 @@ function drawCardDemo(t: number, dt: number) {
   const cycle = (t - cardOpened) % 3.6;
   const reveal = Math.min(1.15, (cycle / 1.8) * 1.15);
   if (cycle < dt) cardFx.clear();
+  const shown = cycle < 0.15 ? null : cardSim;
+  const front = frontOf({ sim: shown, reveal });
   draw(cardCtx, w, h, {
-    level: cardLevel, sim: cycle < 0.15 ? null : cardSim, tick: 0, reveal,
+    level: cardLevel, sim: shown, tick: 0, reveal,
     starsLit: reveal > 0.7 ? cardSim.starsLit : EMPTY,
     hover: -1, time: t, winGlow: 0, hint: EMPTY,
-    particles: cardFx, dt, mini: true,
+    particles: cardFx, dt, mini: true, theme, moonLit,
+    cometCollected: shown ? shown.cometHits.filter((c) => c.order <= front).length : 0,
   });
 }
 
@@ -432,16 +613,22 @@ canvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   startMusicOnce();
   const tile = game.current().tiles[i];
-  const r = game.tap(i);
+  const r = sandbox ? sandboxTap(game, i, TOOLS[toolSel]) : game.tap(i);
+  if (r === "blocked") {
+    toast("Something drifts through here — nothing can be built on its path.", 2400);
+    sfxWrongRing();
+    return;
+  }
   if (r === "none") {
     // Tapping the level's own furniture tells you what it is.
-    const d = describe(tile);
+    const onMilkyWay = tile.kind === "empty" && game.level.galaxy?.includes(i);
+    const d = onMilkyWay ? { name: INFO.milkyway.name, text: INFO.milkyway.short } : describe(tile);
     if (d && game.phase !== "running") { toast(`${d.name} — ${d.text}`, 3200); sfxInfo(); }
     return;
   }
   buzz(r === "removed" ? 8 : 12);
-  spawnFx(i, r === "placed" ? "place" : r === "rotated" ? "rotate" : "remove", now());
-  if (r === "placed") sfxPlace();
+  spawnFx(i, r === "placed" || r === "moved" ? "place" : r === "rotated" ? "rotate" : "remove", now());
+  if (r === "placed" || r === "moved") sfxPlace();
   else if (r === "rotated") sfxRotate();
   else sfxRemove();
   renderTray();
@@ -457,6 +644,8 @@ function renderTray() {
   if (!game) return;
   const tray = $("#tray");
   tray.innerHTML = "";
+  tray.classList.toggle("is-sandbox", sandbox);
+  if (sandbox) { renderToolTray(tray); return; }
   game.tray.forEach((slot, k) => {
     const left = slot.total - slot.used;
     const b = document.createElement("button");
@@ -488,6 +677,38 @@ function renderTray() {
   renderCaption();
 }
 
+/** The Galaxy's tray: one of every tool, and no counts. */
+function renderToolTray(tray: HTMLElement) {
+  TOOLS.forEach((tool, k) => {
+    const b = document.createElement("button");
+    b.className = `slot${k === toolSel ? " selected" : ""}`;
+    b.setAttribute("aria-label", tool.name);
+    b.setAttribute("aria-pressed", String(k === toolSel));
+    b.title = tool.name;
+    const c = document.createElement("canvas");
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    c.width = c.height = Math.round(42 * dpr);
+    const cc = c.getContext("2d")!;
+    cc.scale(dpr, dpr);
+    drawIcon(cc, 42, tool.kind, tool.mask, tool.from);
+    b.appendChild(c);
+    b.addEventListener("click", () => {
+      toolSel = k;
+      sfxSelect();
+      renderTray();
+      b.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    });
+    tray.appendChild(b);
+  });
+  const tool = TOOLS[toolSel];
+  const k = tool.key === "mirror" ? "mirror" : infoKey(tool.kind as TileKind) ?? (tool.key as PieceKey);
+  const info = tool.kind === "moon" ? null : INFO[k as PieceKey];
+  const cap = $("#tray-caption");
+  cap.hidden = false;
+  $("#tray-caption-text").innerHTML =
+    `<b>${tool.name}</b> ${TOOL_TIPS[tool.key] ?? info?.short ?? ""}`;
+}
+
 /** The line above the tray: what the selected piece does. */
 function renderCaption() {
   const cap = $("#tray-caption");
@@ -511,9 +732,20 @@ function pieceName(kind: TileKind, mask?: Light, from?: Light): string {
 
 // ---------------------------------------------------------------- level flow
 
+/** Dress the scene for a night: its world's sky, its moon, its song. */
+function setWorld(key: PhaseKey, lit: number) {
+  theme = THEMES[key] ?? DEFAULT_THEME;
+  moonLit = lit;
+  setSong(key);
+  document.documentElement.style.setProperty("--world", theme.planet.body[0]);
+}
+
 function startLevel(n: number, isEndless = false) {
   endless = isEndless;
+  sandbox = false;
   night = n;
+  const { phase: world, index } = phaseFor(n);
+  setWorld(world.key, moonForNight(index));
 
   // Generating a hard night can take a few hundred milliseconds on an old
   // phone. Show the screen first and generate on the next turn of the loop, so
@@ -547,9 +779,59 @@ function startLevel(n: number, isEndless = false) {
     renderMeta(gen.level);
     renderTray();
     toast(describeGoal(gen.level), 2600);
-    introduceNewPieces(gen.level);
+    // Arriving somewhere new: the world's own card first, then its pieces.
+    if (!isEndless && !progress.phasesSeen.includes(world.key)) openWorld(world, gen.level);
+    else introduceNewPieces(gen.level);
   }, 16);
 }
+
+/** The Galaxy: every element, no rules, nothing recorded. */
+function startSandbox() {
+  endless = false;
+  sandbox = true;
+  night = 0;
+  toolSel = 0;
+  setWorld("neptune", 1);
+  game = new Game(sandboxLevel());
+  winGlow = 0; flare = 0; climaxed = false;
+  clearFx(); boardFx.clear();
+  $("#win").hidden = true;
+  $("#level-name").textContent = "The Galaxy";
+  $("#level-meta").innerHTML = "<span>every element · build anything</span>";
+  show("game");
+  renderTray();
+  musicBrightness(0.5, 0.8);
+  toast("Everything is here. Place anything, tap it again to change it, and Shine.", 3600);
+}
+
+let worldLevel: Level | null = null;
+
+/** A new world's opening card: its planet, its mood, and what is new there. */
+function openWorld(world: World, level: Level) {
+  worldLevel = level;
+  const th = THEMES[world.key];
+  const planet = $("#world-planet");
+  const [a, b, c] = th.planet.body;
+  planet.style.background = world.key === "blackhole"
+    ? "radial-gradient(circle at 50% 50%, #000 0 34%, #ffb86b 38%, #ff7ad9 46%, transparent 64%)"
+    : `radial-gradient(circle at 32% 30%, ${a}, ${b} 55%, ${c})`;
+  planet.classList.toggle("ringed", world.key === "saturn" || world.key === "uranus");
+  $("#world-tag").textContent = `Nights ${world.first}–${Number.isFinite(world.last) ? world.last : "∞"}`;
+  $("#world-name").textContent = world.name;
+  $("#world-blurb").textContent = world.blurb;
+  const fresh = world.introduces.map((f) => FEATURE_NAMES[f]).filter(Boolean);
+  $("#world-new").textContent = fresh.length ? `New here: ${fresh.join(", ")}.` : "";
+  $("#world-card").hidden = false;
+  sfxNewWorld();
+  progress.phasesSeen.push(world.key);
+  saveProgress(progress);
+}
+
+const FEATURE_NAMES: Partial<Record<string, string>> = {
+  crystals: "crystals", tints: "tints", comets: "shooting stars", portals: "portals",
+  terrain: "rough ground", warps: "warps", blackholes: "black holes", asteroids: "asteroids",
+  satellites: "satellites", movingWalls: "moving walls",
+};
 
 function renderMeta(l: Level) {
   const d = Math.round(l.difficulty ?? 1);
@@ -557,26 +839,31 @@ function renderMeta(l: Level) {
     `<i class="pip${i < d ? " on" : ""}"></i>`).join("");
   $("#level-meta").innerHTML =
     `<span class="pips" title="Difficulty ${l.difficulty}">${pips}</span>` +
-    `<span>par ${l.par ?? "?"}</span>`;
+    `<span title="The fewest pieces this night can be solved with">fewest ${l.par ?? "?"}</span>`;
 }
 
 function describeGoal(l: Level): string {
   const rings = l.tiles.filter((t) => t.kind === "receptor");
   const stars = l.tiles.filter((t) => t.kind === "star").length;
+  const comet = l.tiles.some((t) => t.kind === "comet");
   const cols = [...new Set(rings.map((r) => LIGHT_LABEL[r.mask ?? 7]))];
   const ring = rings.length === 1 ? "1 ring" : `${rings.length} rings`;
   const colour = cols.length === 1 ? ` (${cols[0]})` : ` (${cols.join(", ")})`;
-  return stars
-    ? `Light ${ring}${colour} and collect ${stars} star${stars > 1 ? "s" : ""}`
-    : `Light ${ring}${colour}`;
+  const extras = [
+    stars ? `collect ${stars} star${stars > 1 ? "s" : ""}` : "",
+    comet ? "catch the shooting star" : "",
+  ].filter(Boolean);
+  return `Light ${ring}${colour}${extras.length ? ` and ${extras.join(" and ")}` : ""}`;
 }
 
 /**
  * The results card. Stars pop in one at a time, each with its own rising chime,
- * and badges call out what was special about this solve — first try, on par,
- * a streak — because a result nobody comments on does not feel like one.
+ * and badges call out what was special about this solve — first try, the
+ * fewest pieces, a streak — because a result nobody comments on does not feel
+ * like one. Below them, the points: the run's own, then each bonus and
+ * penalty, counting up to the total.
  */
-function showWin(s: ReturnType<Game["score"]>) {
+function showWin(s: ReturnType<Game["score"]>, points: number, newBest: boolean) {
   const total = 1 + s.totalStars;
   const got = 1 + s.stars;
   const starsEl = $("#win-stars");
@@ -593,17 +880,35 @@ function showWin(s: ReturnType<Game["score"]>) {
   $("#win-title").textContent = got === total ? "Perfect night" : "Solved";
   $("#win-sub").textContent =
     `${s.used} piece${s.used === 1 ? "" : "s"} placed` +
-    (s.par ? ` · par ${s.par}` : "") +
+    (s.par ? ` · fewest possible ${s.par}` : "") +
     (s.totalStars ? ` · ${s.stars}/${s.totalStars} stars` : "");
 
   const badges: string[] = [];
   if (s.firstTry) badges.push("✨ First try");
-  if (s.par && s.used < s.par) badges.push("🌙 Under par");
-  else if (s.par && s.used === s.par) badges.push("🌙 On par");
+  if (s.par && s.used < s.par) badges.push("🌙 Fewer than we found!");
+  else if (s.par && s.used === s.par) badges.push("🌙 Fewest possible");
   if (progress.streak >= 2) badges.push(`💫 ${progress.streak} in a row`);
   $("#win-badges").innerHTML = badges
     .map((b, k) => `<span class="badge" style="animation-delay:${0.5 + k * 0.15}s">${b}</span>`)
     .join("");
+
+  const rows = [{ label: "This run", points: s.points }, ...bonuses(s.used, s.par, s.firstTry)];
+  $("#win-points").innerHTML =
+    rows.map((r, k) =>
+      `<div class="pt-row${r.points < 0 ? " neg" : ""}" style="animation-delay:${0.6 + k * 0.12}s">` +
+      `<span>${r.label}</span><b>${r.points > 0 ? "+" : r.points < 0 ? "−" : ""}${Math.abs(r.points)}</b></div>`).join("") +
+    `<div class="pt-row pt-total" style="animation-delay:${0.6 + rows.length * 0.12}s">` +
+    `<span>Total${newBest ? ` <em>new best!</em>` : ""}</span><b data-count="${points}">0</b></div>`;
+  const totalEl = $("#win-points [data-count]");
+  const t0 = performance.now() + (0.6 + rows.length * 0.12) * 1000;
+  const countUp = (ms: number) => {
+    const k = Math.max(0, Math.min(1, (ms - t0) / 700));
+    totalEl.textContent = String(Math.round(points * (1 - Math.pow(1 - k, 3))));
+    if (k < 1) requestAnimationFrame(countUp);
+    else sfxPoints(true);
+  };
+  requestAnimationFrame(countUp);
+  ($("#win [data-action=next]") as HTMLElement).hidden = sandbox;
 
   $("#win").hidden = false;
 }
@@ -619,30 +924,86 @@ function toast(msg: string, ms = 1800) {
 
 // ---------------------------------------------------------------- nights screen
 
+/**
+ * The nights, grouped by world. Each night shows its moon — a crescent on the
+ * first night of a world, full on the tenth — so where you are in a world can
+ * be read at a glance.
+ */
 function renderNights() {
   const grid = $("#night-grid");
   grid.innerHTML = "";
-  const max = Math.max(24, progress.unlocked + 6);
-  for (let n = 1; n <= max; n++) {
-    const locked = n > progress.unlocked;
-    const stars = progress.stars[n] ?? 0;
-    const b = document.createElement("button");
-    b.className = `night${locked ? " locked" : ""}`;
-    b.disabled = locked;
-    b.innerHTML =
-      `<span>${locked ? "·" : n}</span>` +
-      `<span class="stars">${"★".repeat(stars)}</span>` +
-      `<span class="diff">${locked ? "" : `lv ${Math.round(campaignDifficulty(n))}`}</span>`;
-    if (!locked) b.addEventListener("click", () => startLevel(n));
-    grid.appendChild(b);
+  ($("#open-all") as HTMLInputElement).checked = progress.openAll;
+  const lastShown = Math.max(90, progress.unlocked + 6);
+  for (const world of PHASES) {
+    const first = world.first;
+    const last = Math.min(Number.isFinite(world.last) ? world.last : lastShown, lastShown);
+    const open = progress.openAll || first <= progress.unlocked;
+    const th = THEMES[world.key];
+
+    const sec = document.createElement("section");
+    sec.className = `world${open ? "" : " locked"}`;
+    sec.style.setProperty("--world", th.planet.body[0]);
+    const [a, b, c] = th.planet.body;
+    const orb = world.key === "blackhole"
+      ? "radial-gradient(circle, #000 0 40%, #ffb86b 46%, transparent 70%)"
+      : `radial-gradient(circle at 32% 30%, ${a}, ${b} 55%, ${c})`;
+    sec.innerHTML =
+      `<header class="world-head"><i class="world-orb" style="background:${orb}"></i>` +
+      `<div><h3>${world.name}</h3><p>${open ? world.blurb : "Not yet reached."}</p></div></header>`;
+    const row = document.createElement("div");
+    row.className = "world-nights";
+    for (let n = first; n <= last; n++) {
+      const locked = !progress.openAll && n > progress.unlocked;
+      const stars = progress.stars[n] ?? 0;
+      const best = progress.best[n];
+      const btn = document.createElement("button");
+      btn.className = `night${locked ? " locked" : ""}${n === progress.unlocked ? " current" : ""}`;
+      btn.disabled = locked;
+      btn.setAttribute("aria-label", `Night ${n}${locked ? ", locked" : ""}`);
+      btn.appendChild(moonIcon(moonForNight(n - first), locked));
+      const label = document.createElement("span");
+      label.className = "num";
+      label.textContent = String(n);
+      btn.appendChild(label);
+      const meta = document.createElement("span");
+      meta.className = "stars";
+      meta.textContent = best !== undefined ? `${"★".repeat(stars)} ${best}` : "★".repeat(stars);
+      btn.appendChild(meta);
+      if (!locked) btn.addEventListener("click", () => startLevel(n));
+      row.appendChild(btn);
+    }
+    sec.appendChild(row);
+    grid.appendChild(sec);
   }
+}
+
+/** A little moon at a phase: just the lit part, no ghost of the rest. */
+function moonIcon(lit: number, dim: boolean): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  c.width = c.height = Math.round(26 * dpr);
+  c.className = "moon-icon";
+  const cc = c.getContext("2d")!;
+  cc.scale(dpr, dpr);
+  cc.translate(13, 13);
+  cc.rotate(-0.22);
+  const path = moonPath(9, lit);
+  cc.fillStyle = dim ? "#6f6690" : "#f6c64a";
+  cc.shadowColor = dim ? "transparent" : "rgba(255, 226, 154, 0.6)";
+  cc.shadowBlur = 6;
+  cc.fill(path);
+  cc.shadowBlur = 0;
+  cc.strokeStyle = "rgba(91, 58, 18, 0.7)";
+  cc.lineWidth = 1.2;
+  cc.stroke(path);
+  return c;
 }
 
 // ---------------------------------------------------------------- how to play
 
 function renderHowto() {
-  const keys: PieceKey[] = ["receptor", "mirror", "splitter", "crystal", "tint",
-    "star", "wall", "portal", "blackhole"];
+  const keys: PieceKey[] = ["receptor", "mirror", "splitter", "star", "milkyway", "crystal", "tint",
+    "comet", "portal", "wall", "terrain", "warp", "blackhole", "asteroid", "satellite"];
   const ul = $("#howto-list");
   ul.innerHTML = "";
   for (const k of keys) {
@@ -686,6 +1047,18 @@ document.addEventListener("click", (e) => {
   switch (action) {
     case "play": startLevel(progress.unlocked); break;
     case "nights": show("nights"); break;
+    case "galaxy": startSandbox(); break;
+    case "open-all":
+      progress.openAll = ($("#open-all") as HTMLInputElement).checked;
+      saveProgress(progress);
+      sfxSelect();
+      renderNights();
+      break;
+    case "world-ok":
+      $("#world-card").hidden = true;
+      if (worldLevel) introduceNewPieces(worldLevel);
+      worldLevel = null;
+      break;
     case "endless": endlessSeed = Date.now() >>> 0; startLevel(1, true); break;
     case "home": show("title"); break;
     case "howto": renderHowto(); $("#howto").hidden = false; sfxInfo(); break;
@@ -705,7 +1078,10 @@ document.addEventListener("click", (e) => {
       beginRun();
       break;
     }
-    case "reset": game?.reset(); clearFx(); boardFx.clear(); renderTray(); sfxRemove(); break;
+    case "reset":
+      if (sandbox) { startSandbox(); sfxRemove(); break; }
+      game?.reset(); clearFx(); boardFx.clear(); renderTray(); sfxRemove();
+      break;
     case "hint": {
       if (!game) return;
       const ok = game.takeHint();
@@ -714,6 +1090,13 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "piece-info": {
+      if (sandbox) {
+        const tool = TOOLS[toolSel];
+        const k = tool.kind === "moon" ? null
+          : tool.kind === "milkyway" || tool.kind === "warp" ? tool.kind as PieceKey : infoKey(tool.kind);
+        if (k) { cardQueue = []; openCard(k, false); }
+        break;
+      }
       const slot = game?.tray[game.selected];
       const k = slot && infoKey(slot.kind);
       if (k) { cardQueue = []; openCard(k, false); }
@@ -736,14 +1119,19 @@ document.addEventListener("click", (e) => {
 // Keyboard: space to run, R to reset, 1-9 to pick a tray slot.
 document.addEventListener("keydown", (e) => {
   if (!game || currentScreen !== "game") return;
+  if (!$("#world-card").hidden) {
+    if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); ($("[data-action=world-ok]") as HTMLElement).click(); }
+    return;
+  }
   if (!$("#piece-card").hidden) {
     if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); nextCard(); }
     return;
   }
   if (e.key === " " || e.key === "Enter") { e.preventDefault(); ($("[data-action=run]") as HTMLElement).click(); }
-  else if (e.key.toLowerCase() === "r") { game.reset(); clearFx(); renderTray(); }
+  else if (e.key.toLowerCase() === "r") { ($("[data-action=reset]") as HTMLElement).click(); }
   else if (/^[1-9]$/.test(e.key)) {
     const k = Number(e.key) - 1;
+    if (sandbox) { if (k < TOOLS.length) { toolSel = k; sfxSelect(); renderTray(); } return; }
     if (k < game.tray.length) { game.selected = k; sfxSelect(); renderTray(); }
   }
 });
@@ -777,6 +1165,7 @@ if (import.meta.env.DEV) {
     level: () => game?.level,
     board: () => game?.board,
     go: (n: number, e = false) => startLevel(n, e),
+    galaxy: () => startSandbox(),
     solveIt: () => {
       if (!game?.level.solution) return "no stored solution";
       for (const p of game.level.solution) {

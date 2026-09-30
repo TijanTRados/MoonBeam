@@ -75,10 +75,10 @@ function pieceTypes(level: Level): { kind: TileKind; mask?: Light; from?: Light 
  * Derived from the `touched` set that `evaluate` already computed, so a search
  * node costs exactly one pass over the movement cycle rather than two.
  */
-function frontierFrom(level: Level, touched: Set<number>): number[] {
+function frontierFrom(level: Level, touched: Set<number>, noGo: Set<number>): number[] {
   const out: number[] = [];
   for (const i of touched) {
-    if (level.tiles[i].kind === "empty") out.push(i);
+    if (level.tiles[i].kind === "empty" && !noGo.has(i)) out.push(i);
   }
   return out.sort((a, b) => a - b);
 }
@@ -117,6 +117,11 @@ export function solve(level: Level, opts: SolveOpts = {}): SolveResult {
     remaining.set(k, (remaining.get(k) ?? 0) + it.count);
   }
 
+  // Cells something moving passes through. Pieces cannot go there: the player
+  // is not allowed to, so the solver must not count on it either.
+  const noGo = new Set<number>();
+  for (const t of level.tiles) for (const p of t.track ?? []) noGo.add(p.y * level.w + p.x);
+
   let seen = new Set<string>();
   let solutions: Placement[][] = [];
   const placed: Placement[] = [];
@@ -142,7 +147,7 @@ export function solve(level: Level, opts: SolveOpts = {}): SolveResult {
     }
     if (placed.length >= limit) return false;
 
-    for (const i of frontierFrom(work, out.touched)) {
+    for (const i of frontierFrom(work, out.touched, noGo)) {
       for (const t of types) {
         const left = remaining.get(keyOf(t.kind, t.mask, t.from)) ?? 0;
         if (left <= 0) continue;
@@ -266,7 +271,7 @@ export function features(level: Level, res: SolveResult): number[] {
  * vectors, using the requested target as the ground-truth label. Re-run the
  * tool and paste the output here after changing the generator's budgets.
  *
- * Fit on 579 levels: R^2 = 0.973, RMSE = 0.50.
+ * Fit on 658 levels: R^2 = 0.977, RMSE = 0.45.
  *
  * A few weights come out negative. That is collinearity, not a claim that
  * moving parts make a level easier — stars, moving parts and high piece counts
@@ -277,19 +282,19 @@ export function features(level: Level, res: SolveResult): number[] {
  */
 const COEF: readonly number[] = [
   // base, then one per FEATURE_NAMES entry
-  0.8554,  // base
-  0.4360,  // par
-  0.0969,  // branchers
-  -0.0473, // colours
-  -0.0824, // receptors
-  1.3446,  // stars
-  0.3271,  // trayExtra
-  -0.2350, // moving
-  0.1649,  // search
-  0.0502,  // resisted
-  -0.2016, // tightness
-  0.0015,  // depth
-  0.0293,  // combined
+  0.1890,  // base
+  0.4880,  // par
+  0.1483,  // branchers
+  -0.0205, // colours
+  -0.0935, // receptors
+  0.7898,  // stars
+  0.5045,  // trayExtra
+  0.0951,  // moving
+  0.1939,  // search
+  0.1309,  // resisted
+  0.1954,  // tightness
+  -0.0026, // depth
+  0.0819,  // combined
 ];
 
 export function scoreDifficulty(level: Level, res: SolveResult): number {

@@ -30,6 +30,7 @@
       <button class="btn btn-primary" data-action="play">Continue</button>
       <button class="btn" data-action="nights">Nights</button>
       <button class="btn" data-action="endless">Endless</button>
+      <button class="btn btn-galaxy" data-action="galaxy">Galaxy <small>every element</small></button>
       <button class="btn btn-quiet" data-action="howto">How to play</button>
     </nav>
     <p class="credit">A 2015 thesis project, rebuilt.<br />Tijan Tomislav Radoš</p>
@@ -44,7 +45,10 @@
     <header class="bar">
       <button class="icon-btn" data-action="home" aria-label="Back">‹</button>
       <h2>Nights</h2>
-      <span class="bar-spacer"></span>
+      <label class="open-all">
+        <input type="checkbox" id="open-all" data-action="open-all" />
+        <span>Open all</span>
+      </label>
     </header>
     <div id="night-grid" class="night-grid"></div>
   </section>
@@ -65,6 +69,7 @@
     <div class="board-wrap">
       <canvas id="board" aria-label="Puzzle grid"></canvas>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <div id="score" class="score-pill" aria-live="off" hidden></div>
     </div>
 
     <div id="tray-caption" class="tray-caption" hidden>
@@ -86,6 +91,7 @@
       <h3 id="win-title">Solved</h3>
       <p id="win-sub" class="muted"></p>
       <div id="win-badges" class="win-badges"></div>
+      <div id="win-points" class="win-points"></div>
       <div class="card-actions">
         <button class="btn btn-ghost" data-action="replay">Again</button>
         <button class="btn btn-primary" data-action="next">Next night</button>
@@ -102,6 +108,20 @@
       <p id="piece-detail" class="muted"></p>
       <div class="card-actions">
         <button class="btn btn-primary" data-action="piece-ok">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- new world -->
+  <div id="world-card" class="overlay" hidden>
+    <div class="card card-world">
+      <div id="world-tag" class="piece-tag">New world</div>
+      <div id="world-planet" class="world-planet" aria-hidden="true"></div>
+      <h3 id="world-name"></h3>
+      <p id="world-blurb" class="muted"></p>
+      <p id="world-new" class="world-new"></p>
+      <div class="card-actions">
+        <button class="btn btn-primary" data-action="world-ok">Let's go</button>
       </div>
     </div>
   </div>

@@ -21,7 +21,11 @@ export type FxKind =
   | "absorb"         // light fell into a black hole
   | "prism"          // white light split by a crystal — the rainbow pulse
   | "shockwave"      // the moment of solving
-  | "constellation"; // the solved level, joined up like a star map
+  | "constellation"  // the solved level, joined up like a star map
+  | "points"         // a score popping up and floating away
+  | "shatter"        // light smashing into an asteroid
+  | "cometLeap"      // a shooting star streaking to its next piece
+  | "warpFlash";     // light passing through a warp gate
 
 /** A straight run of light, in grid coordinates, at some depth from its source. */
 export interface PathSeg { x0: number; y0: number; x1: number; y1: number; depth: number; light: Light }
@@ -37,6 +41,12 @@ interface Fx {
   paths?: PathSeg[];
   /** For `constellation`: the cells to join, in order. */
   points?: number[];
+  /** Grid position (cell units, may be off the board), used instead of `i`. */
+  at?: { x: number; y: number };
+  /** For `cometLeap`: where it lands. */
+  to?: { x: number; y: number };
+  text?: string;
+  color?: string;
 }
 
 const active: Fx[] = [];
@@ -44,6 +54,7 @@ const active: Fx[] = [];
 const LIFE: Record<FxKind, number> = {
   place: 0.34, rotate: 0.26, remove: 0.28, star: 0.8, ring: 1.0, wrong: 0.6,
   absorb: 0.55, prism: 1.6, shockwave: 1.3, constellation: 3.4,
+  points: 1.1, shatter: 0.8, cometLeap: 0.55, warpFlash: 0.6,
 };
 
 export function spawnFx(
@@ -59,6 +70,17 @@ export function spawnFx(
     if (active[k].i === i && active[k].kind === kind) active.splice(k, 1);
   }
   active.push({ kind, i, born: now, life: LIFE[kind], light, ...extra });
+  if (active.length > 80) active.splice(0, active.length - 80);
+}
+
+/** An effect at a grid position rather than a cell — off the board, or between cells. */
+export function spawnFxAt(
+  x: number, y: number,
+  kind: FxKind,
+  now: number,
+  extra: { to?: { x: number; y: number }; text?: string; color?: string; light?: Light } = {},
+) {
+  active.push({ kind, i: -1, born: now, life: LIFE[kind], light: extra.light ?? 7, at: { x, y }, ...extra });
   if (active.length > 80) active.splice(0, active.length - 80);
 }
 
@@ -81,9 +103,11 @@ export function drawFx(ctx: CanvasRenderingContext2D, L: Layout, now: number) {
     // the first one.
     if (t < 0) continue;
 
-    const x = L.ox + ((f.i % L.w) + 0.5) * L.cell;
-    const y = L.oy + (Math.floor(f.i / L.w) + 0.5) * L.cell;
+    const x = f.at ? L.ox + (f.at.x + 0.5) * L.cell : L.ox + ((f.i % L.w) + 0.5) * L.cell;
+    const y = f.at ? L.oy + (f.at.y + 0.5) * L.cell : L.oy + (Math.floor(f.i / L.w) + 0.5) * L.cell;
     const e = easeOut(t);
+
+    if (f.kind === "cometLeap") { drawCometLeap(ctx, L, f, t, x, y); continue; }
 
     // Board-wide effects draw in board space, not around a cell.
     if (f.kind === "prism") { drawPrismBurst(ctx, L, f, t, x, y); continue; }
@@ -174,6 +198,63 @@ export function drawFx(ctx: CanvasRenderingContext2D, L: Layout, now: number) {
         break;
       }
 
+      case "points": {
+        // Floats up and fades; bigger numbers are drawn bigger.
+        const big = Math.abs(Number(f.text?.replace(/[^0-9-]/g, "") ?? 0)) >= 50;
+        const size = L.cell * (big ? 0.36 : 0.24) * (1 + 0.25 * (1 - e));
+        ctx.font = `700 ${size}px "Pixelify Sans", monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const lift = -L.cell * (0.35 + 0.6 * e);
+        const fade = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
+        ctx.lineWidth = Math.max(2, size * 0.18);
+        ctx.strokeStyle = alpha("#120e26", 0.8 * fade);
+        ctx.strokeText(f.text ?? "", 0, lift);
+        ctx.fillStyle = alpha(f.color ?? "#ffe066", fade);
+        ctx.fillText(f.text ?? "", 0, lift);
+        break;
+      }
+
+      case "shatter": {
+        // Shards of broken light flung off the rock, spinning.
+        const c = lightColor(f.light);
+        for (let k = 0; k < 9; k++) {
+          const a = (k / 9) * Math.PI * 2 + k * 0.7;
+          const d = L.cell * (0.15 + 0.7 * e);
+          ctx.save();
+          ctx.translate(Math.cos(a) * d, Math.sin(a) * d + e * e * L.cell * 0.3);
+          ctx.rotate(t * 8 + k);
+          ctx.fillStyle = alpha(k % 3 ? c : "#ffffff", 0.9 * (1 - t));
+          const sz = L.cell * 0.07 * (1 - t * 0.5);
+          ctx.beginPath(); ctx.moveTo(0, -sz); ctx.lineTo(sz * 0.6, sz); ctx.lineTo(-sz * 0.6, sz * 0.4); ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.strokeStyle = alpha("#ffb08a", 0.8 * (1 - t));
+        ctx.lineWidth = Math.max(1, L.cell * 0.025);
+        ctx.beginPath();
+        for (let k = 0; k < 5; k++) {
+          const a = k * 1.3;
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(a) * L.cell * 0.35 * e, Math.sin(a) * L.cell * 0.35 * e);
+        }
+        ctx.stroke();
+        break;
+      }
+
+      case "warpFlash": {
+        const c = f.color ?? "#ffb86b";
+        for (const off of [0, 0.3]) {
+          const tt = (t - off) / (1 - off);
+          if (tt <= 0) continue;
+          ctx.strokeStyle = alpha(c, 0.8 * (1 - tt));
+          ctx.lineWidth = Math.max(1.5, L.cell * 0.05 * (1 - tt));
+          ctx.beginPath(); ctx.arc(0, 0, L.cell * (0.15 + 0.6 * easeOut(tt)), 0, Math.PI * 2); ctx.stroke();
+        }
+        glint(ctx, 0, 0, L.cell * 0.7 * (1 - t), 0.9 * (1 - t), c);
+        break;
+      }
+
       case "shockwave": {
         // A wide soft ring sweeping the whole board, rainbow-edged, from the
         // cell that completed the solution.
@@ -256,6 +337,34 @@ function drawPrismBurst(ctx: CanvasRenderingContext2D, L: Layout, f: Fx, t: numb
     ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
     if (p < 1) glint(ctx, ex, ey, L.cell * 0.55, 0.95 * fadeAll, hue);
   }
+  ctx.restore();
+}
+
+/**
+ * A shooting star leaving the piece just collected and streaking to the next:
+ * a bright head with a tail, arcing a little, with a flash where it lands.
+ */
+function drawCometLeap(ctx: CanvasRenderingContext2D, L: Layout, f: Fx, t: number, x0: number, y0: number) {
+  if (!f.to) return;
+  const x1 = L.ox + (f.to.x + 0.5) * L.cell, y1 = L.oy + (f.to.y + 0.5) * L.cell;
+  const mx = (x0 + x1) / 2, my = (y0 + y1) / 2 - L.cell * 0.8;
+  const at = (k: number) => {
+    const q = 1 - k;
+    return { x: q * q * x0 + 2 * q * k * mx + k * k * x1, y: q * q * y0 + 2 * q * k * my + k * k * y1 };
+  };
+  const k = easeOut(Math.min(1, t / 0.8));
+  ctx.save();
+  ctx.lineCap = "round";
+  for (let j = 0; j < 8; j++) {
+    const a = at(Math.max(0, k - j * 0.04)), b = at(Math.max(0, k - (j + 1) * 0.04));
+    ctx.strokeStyle = alpha("#bff4ff", 0.8 * (1 - j / 8));
+    ctx.lineWidth = L.cell * 0.12 * (1 - j / 8);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  const h = at(k);
+  glint(ctx, h.x, h.y, L.cell * 0.6, 0.95, "#ffffff");
+  if (t > 0.75) glint(ctx, x1, y1, L.cell * 1.2 * (1 - (t - 0.75) / 0.25), 1, "#bff4ff");
+  glint(ctx, x0, y0, L.cell * 0.9 * Math.max(0, 1 - t * 3), 1, "#ffffff");
   ctx.restore();
 }
 

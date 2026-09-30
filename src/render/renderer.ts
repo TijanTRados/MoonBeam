@@ -8,11 +8,16 @@
 import {
   Chan, Level, Light, Tile, WHITE, idx,
 } from "../engine/types";
-import { Segment, SimResult, resolveTiles } from "../engine/simulate";
+import { Segment, SimResult } from "../engine/simulate";
 import { PALETTE as P, alpha, lightColor } from "./theme";
 import { drawFx } from "./fx";
 import { drawSky, glint } from "./sky";
 import { Particles, rand } from "./particles";
+import { drawMoon as paintMoon } from "./moon";
+import { DEFAULT_THEME, Theme } from "./themes";
+import {
+  drawAsteroid, drawCometPiece, drawDish, drawMilkyWay, drawSatellitePiece, drawTerrain, drawWarpGate,
+} from "./elements";
 
 export interface ViewState {
   level: Level;
@@ -47,6 +52,16 @@ export interface ViewState {
    * crystal can show which way its colours will leave before you press Shine.
    */
   previewSim?: SimResult | null;
+  /** Board time as a float, so moving pieces glide between cells. Defaults to `tick`. */
+  clock?: number;
+  /** How full the moon is, 0..1: it waxes across a phase's ten nights. */
+  moonLit?: number;
+  /** The phase's look. */
+  theme?: Theme;
+  /** Shooting-star pieces collected so far; the next one is the active one. */
+  cometCollected?: number;
+  /** Warp gates flashing as light passes through them: "axis:index" -> 0..1. */
+  gateFlash?: Map<string, number>;
 }
 
 export interface Layout {
@@ -93,9 +108,12 @@ export function draw(
 ) {
   const L = computeLayout(cw, ch, v.level);
 
+  const theme = v.theme ?? DEFAULT_THEME;
   drawSky(ctx, cw, ch, v.time, {
     mini: v.mini,
     avoid: { x: L.ox, y: L.oy, w: L.w * L.cell, h: L.h * L.cell },
+    moons: v.level.emitters.map((e) => ({ x: cx(L, e.x), y: L.oy - L.cell * 0.7, r: L.cell * 0.38 })),
+    theme,
   });
 
   // The punch: a brief scale-up of everything on the board at the moment of
@@ -111,8 +129,13 @@ export function draw(
   }
 
   drawGrid(ctx, L, v);
+  if (v.level.galaxy?.length) {
+    drawMilkyWay(ctx, v.level.galaxy.map((i) => ({ x: cx(L, i % L.w), y: cy(L, Math.floor(i / L.w)) })),
+      L.cell, v.time);
+  }
+  drawGates(ctx, L, v);
 
-  const tiles = resolveTiles(v.level, v.tick);
+  const tiles = v.level.tiles;
 
   // Beams sit under the furniture so pieces read as solid objects the light
   // strikes, rather than decals floating on top of it.
@@ -125,10 +148,27 @@ export function draw(
   const front = frontOf(v);
   const arrival = arrivalOrders(v);
 
+  const comets = cometCells(v.level);
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i];
-    if (t.kind === "empty") continue;
-    drawTile(ctx, L, i, t, v, front, arrival);
+    if (t.kind === "empty" || (t.track && t.track.length > 1)) continue;
+    drawTile(ctx, L, i, t, v, front, arrival, theme, comets);
+  }
+  // Moving pieces are drawn where they are *between* cells, so they glide.
+  for (let i = 0; i < tiles.length; i++) {
+    const t = tiles[i];
+    if (!t.track || t.track.length <= 1) continue;
+    const pos = trackPos(t, v.clock ?? v.tick);
+    ctx.save();
+    ctx.translate(L.ox + (pos.x + 0.5) * L.cell, L.oy + (pos.y + 0.5) * L.cell);
+    if (t.kind === "asteroid") {
+      const here = Math.round(pos.y) * L.w + Math.round(pos.x);
+      const hit = (v.sim?.asteroidsHit.has(here) ?? false) && front >= (arrival.get(here) ?? Infinity);
+      drawAsteroid(ctx, L.cell, v.time, i, hit);
+    } else if (t.kind === "wall") {
+      drawWall(ctx, L.cell, t, v);
+    }
+    ctx.restore();
   }
 
   drawMoon(ctx, L, v);
@@ -216,7 +256,16 @@ function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
    * A segment of order N owns the interval [N-1, N] of the advancing front, so
    * it grows from nothing to full length while the front crosses that cell.
    */
-  const progress = (s: Segment) => Math.min(1, Math.max(0, front - (s.order - 1)));
+  // A segment spans `span` hops of the front (one, normally; a satellite's
+  // carry takes as long as it holds the light).
+  const progress = (s: Segment) => {
+    const span = s.span ?? 1;
+    return Math.min(1, Math.max(0, (front - (s.order - span)) / span));
+  };
+  const galaxy = new Set(v.level.galaxy ?? []);
+  const inGalaxy = (s: Segment) =>
+    (inGrid(L, s.x1, s.y1) && galaxy.has(s.y1 * L.w + s.x1)) ||
+    (inGrid(L, s.x0, s.y0) && galaxy.has(s.y0 * L.w + s.x0));
 
   // Three passes: a wide soft halo, a bright core, and a stream of glitter
   // flowing along the core in the direction the light travels.
@@ -227,14 +276,21 @@ function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
       const c = lightColor(s.light);
 
       if (s.warp) { if (pass === 1) drawWarp(ctx, L, s, p, v); continue; }
+      if (s.carry) { if (pass === 1) drawCarry(ctx, L, s, p, v); continue; }
 
-      const a = cx(L, s.x0), b = cy(L, s.y0);
-      const c2 = cx(L, s.x1), d2 = cy(L, s.y1);
+      let a = cx(L, s.x0), b = cy(L, s.y0);
+      let c2 = cx(L, s.x1), d2 = cy(L, s.y1);
+      // Warp gates sit on the rim, half a cell out: light runs into the gate
+      // and comes back out of its twin, and is never drawn past the edge.
+      if (s.gate === "out") { c2 = (a + c2) / 2; d2 = (b + d2) / 2; }
+      if (s.gate === "in") { a = (a + c2) / 2; b = (b + d2) / 2; }
       const ex = a + (c2 - a) * p, ey = b + (d2 - b) * p;
+      // Over the Milky Way the light shines brighter.
+      const glow = inGalaxy(s) ? 1 : 0;
 
       // Light that runs off the board dissolves rather than stopping dead:
       // the last half-cell fades to nothing, and fizzes (see emitGlitter).
-      const leaving = !inGrid(L, s.x1, s.y1);
+      const leaving = !inGrid(L, s.x1, s.y1) && !s.gate;
       const colourAt = (a0: number) => {
         if (!leaving) return alpha(c, a0);
         const g = ctx.createLinearGradient(a, b, c2, d2);
@@ -248,13 +304,18 @@ function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
       ctx.moveTo(a, b);
       ctx.lineTo(ex, ey);
       if (pass === 0) {
-        ctx.strokeStyle = colourAt(0.16 + 0.12 * flare);
-        ctx.lineWidth = L.cell * (0.34 + 0.2 * flare);
+        ctx.strokeStyle = colourAt(0.16 + 0.12 * flare + 0.16 * glow);
+        ctx.lineWidth = L.cell * (0.34 + 0.2 * flare + 0.18 * glow);
         ctx.stroke();
       } else if (pass === 1) {
         ctx.strokeStyle = colourAt(0.95);
-        ctx.lineWidth = L.cell * (0.085 + 0.05 * flare);
+        ctx.lineWidth = L.cell * (0.085 + 0.05 * flare + 0.04 * glow);
         ctx.stroke();
+        if (glow) {
+          ctx.strokeStyle = alpha("#ffffff", 0.55 + 0.25 * Math.sin(v.time * 6 + s.order));
+          ctx.lineWidth = L.cell * 0.04;
+          ctx.stroke();
+        }
         if (flare > 0) {
           ctx.strokeStyle = leaving ? colourAt(0.8 * flare) : alpha("#ffffff", 0.8 * flare);
           ctx.lineWidth = L.cell * 0.05;
@@ -277,11 +338,14 @@ function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
   // The head of the beam: a bright mote with a glint, a nod to the original's
   // travelling ball. Only segments still growing have a head.
   for (const s of segs) {
-    if (s.warp) continue;
+    if (s.warp || s.carry) continue;
     const p = progress(s);
     if (p <= 0 || p >= 1) continue;
-    const hx = cx(L, s.x0) + (cx(L, s.x1) - cx(L, s.x0)) * p;
-    const hy = cy(L, s.y0) + (cy(L, s.y1) - cy(L, s.y0)) * p;
+    let a = cx(L, s.x0), b = cy(L, s.y0), c2 = cx(L, s.x1), d2 = cy(L, s.y1);
+    if (s.gate === "out") { c2 = (a + c2) / 2; d2 = (b + d2) / 2; }
+    if (s.gate === "in") { a = (a + c2) / 2; b = (b + d2) / 2; }
+    const hx = a + (c2 - a) * p;
+    const hy = b + (d2 - b) * p;
     const c = lightColor(s.light);
     const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, L.cell * 0.45);
     g.addColorStop(0, alpha(c, 0.95));
@@ -313,7 +377,7 @@ function emitGlitter(
   const dt = v.dt!;
   const now = v.time;
   for (const s of segs) {
-    if (s.warp) continue;
+    if (s.warp || s.carry) continue;
     const p = progress(s);
     if (p <= 0) continue;
     const c = lightColor(s.light);
@@ -337,7 +401,7 @@ function emitGlitter(
     }
 
     // Dissolving off the edge.
-    if (!inGrid(L, s.x1, s.y1) && p > 0.5) {
+    if (!inGrid(L, s.x1, s.y1) && !s.gate && p > 0.5) {
       let fizz = 14 * dt;
       while (fizz > 0) {
         if (Math.random() < fizz) {
@@ -354,6 +418,73 @@ function emitGlitter(
       }
     }
   }
+}
+
+/**
+ * A satellite carrying light to its dish: a dotted arc over the board, with the
+ * light riding along it as a glowing packet for as long as the satellite holds
+ * it. The delay is visible — you watch the light wait.
+ */
+function drawCarry(ctx: CanvasRenderingContext2D, L: Layout, s: Segment, p: number, v: ViewState) {
+  const ax = cx(L, s.x0), ay = cy(L, s.y0), bx = cx(L, s.x1), by = cy(L, s.y1);
+  const mx = (ax + bx) / 2, my = Math.min(ay, by) - L.cell * 1.2;
+  const c = lightColor(s.light);
+  ctx.setLineDash([L.cell * 0.05, L.cell * 0.12]);
+  ctx.lineDashOffset = -v.time * L.cell;
+  ctx.strokeStyle = alpha(c, 0.35);
+  ctx.lineWidth = L.cell * 0.035;
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.quadraticCurveTo(mx, my, bx, by); ctx.stroke();
+  ctx.setLineDash([]);
+  if (p <= 0 || p >= 1) return;
+  const q = 1 - p;
+  const x = q * q * ax + 2 * q * p * mx + p * p * bx;
+  const y = q * q * ay + 2 * q * p * my + p * p * by;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, L.cell * 0.35);
+  g.addColorStop(0, alpha(c, 0.95));
+  g.addColorStop(1, alpha(c, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, L.cell * 0.35, 0, Math.PI * 2); ctx.fill();
+  glint(ctx, x, y, L.cell * 0.4, 0.9, "#ffffff");
+}
+
+/** Warp gates on the rim, in their pair's colour, flashing as light passes. */
+function drawGates(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
+  for (const wp of v.level.warps ?? []) {
+    const flash = v.gateFlash?.get(`${wp.axis}:${wp.index}`) ?? 0;
+    if (wp.axis === "row") {
+      const y = L.oy + (wp.index + 0.5) * L.cell;
+      drawWarpGate(ctx, L.ox - L.cell * 0.12, y, L.cell, true, wp.hue, v.time, flash);
+      drawWarpGate(ctx, L.ox + L.w * L.cell + L.cell * 0.12, y, L.cell, true, wp.hue, v.time, flash);
+    } else {
+      const x = L.ox + (wp.index + 0.5) * L.cell;
+      drawWarpGate(ctx, x, L.oy - L.cell * 0.12, L.cell, false, wp.hue, v.time, flash);
+      drawWarpGate(ctx, x, L.oy + L.h * L.cell + L.cell * 0.12, L.cell, false, wp.hue, v.time, flash);
+    }
+  }
+}
+
+/**
+ * Where a moving piece is at a moment of board time. It dwells in each cell
+ * for most of a tick and glides to the next at the end, so the cell it looks
+ * like it is in is the cell the physics has it in.
+ */
+export function trackPos(t: Tile, clock: number): { x: number; y: number } {
+  const tr = t.track!;
+  const n = tr.length;
+  const c = clock + (t.phase ?? 0);
+  const base = Math.floor(c);
+  const frac = c - base;
+  const a = tr[((base % n) + n) % n], b = tr[(((base + 1) % n) + n) % n];
+  const k = frac < 0.6 ? 0 : (frac - 0.6) / 0.4;
+  const e = k * k * (3 - 2 * k);
+  return { x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e };
+}
+
+/** Shooting-star pieces by their place in the sequence. */
+function cometCells(level: Level): Map<number, number> {
+  const m = new Map<number, number>();
+  level.tiles.forEach((t, i) => { if (t.kind === "comet") m.set(t.seq ?? 0, i); });
+  return m;
 }
 
 function drawWarp(ctx: CanvasRenderingContext2D, L: Layout, s: Segment, fade: number, v: ViewState) {
@@ -382,6 +513,8 @@ function drawTile(
   v: ViewState,
   front: number,
   arrival: Map<number, number>,
+  theme: Theme = DEFAULT_THEME,
+  comets: Map<number, number> = new Map(),
 ) {
   const x = i % L.w, y = Math.floor(i / L.w);
   const px = cx(L, x), py = cy(L, y);
@@ -413,6 +546,35 @@ function drawTile(
     case "blackhole": drawHole(ctx, s, true, v); break;
     case "whitehole": drawHole(ctx, s, false, v); break;
     case "star": drawStar(ctx, s, v.starsLit.has(i), v.time, i); break;
+    case "terrain": drawTerrain(ctx, s, theme.terrain, i); break;
+    case "asteroid": drawAsteroid(ctx, s, v.time, i, false); break;
+    case "satellite": {
+      const carry = v.sim?.segments.find((g) => g.carry && g.x0 === x && g.y0 === y);
+      const span = carry?.span ?? 1;
+      const p = carry ? (front - (carry.order - span)) / span : 0;
+      drawSatellitePiece(ctx, s, v.time, t.delay ?? 1, p > 0 && p < 1 ? 1 : 0);
+      break;
+    }
+    case "dish": {
+      const carry = v.sim?.segments.find((g) => g.carry && g.x1 === x && g.y1 === y);
+      const done = carry ? front - carry.order : -1;
+      drawDish(ctx, s, v.time, done >= 0 && done < 1.5 ? 1 - done / 1.5 : 0);
+      break;
+    }
+    case "comet": {
+      const seq = t.seq ?? 0;
+      const got = v.cometCollected ?? 0;
+      const state = seq < got ? "collected" : seq === got ? "active" : "waiting";
+      // The tail streams back towards where the comet came from.
+      const other = comets.get(seq > 0 ? seq - 1 : seq + 1);
+      let dir = -Math.PI * 0.75;
+      if (other !== undefined) {
+        const ox = other % L.w, oy = Math.floor(other / L.w);
+        dir = seq > 0 ? Math.atan2(oy - y, ox - x) : Math.atan2(y - oy, x - ox);
+      }
+      drawCometPiece(ctx, s, v.time, seq, state, dir);
+      break;
+    }
     case "receptor":
       drawReceptor(ctx, s, t.mask ?? WHITE,
                    (v.sim?.satisfied.has(i) ?? false) && reached, v);
@@ -803,80 +965,6 @@ function drawReceptor(
 
 // ---------------------------------------------------------------- the moon
 
-/**
- * A young crescent moon, drawn like the reference sticker: a fat golden
- * crescent with pointed tips, a lighter band along its inner curve, a warm
- * outline, and two sparkles keeping it company.
- *
- * It is one even-odd path — a disc minus an offset disc — so the glow can hug
- * the crescent via shadow blur. A radial gradient behind it would shine through
- * the bitten-out part and read as a second, ghostly full moon.
- */
-export function drawMoonShape(ctx: CanvasRenderingContext2D, r: number, time: number, release: number) {
-  const moon = new Path2D();
-  moon.arc(0, 0, r, 0, Math.PI * 2);
-  const ix = r * 0.4, iy = -r * 0.14, ir = r * 0.9;
-  moon.arc(ix, iy, ir, 0, Math.PI * 2);
-
-  ctx.save();
-  ctx.rotate(-0.18);
-
-  // Glow that follows the crescent.
-  ctx.save();
-  ctx.shadowColor = P.moonGlow;
-  ctx.shadowBlur = r * (1.6 + release * 2.5);
-  ctx.fillStyle = "#f6c64a";
-  ctx.fill(moon, "evenodd");
-  ctx.restore();
-
-  // Body, then the two-tone shading clipped inside it.
-  ctx.fillStyle = "#f6c64a";
-  ctx.fill(moon, "evenodd");
-  ctx.save();
-  ctx.clip(moon, "evenodd");
-  // Lighter band along the inner (concave) edge.
-  ctx.strokeStyle = "#ffe98f";
-  ctx.lineWidth = r * 0.42;
-  ctx.beginPath(); ctx.arc(ix, iy, ir, 0, Math.PI * 2); ctx.stroke();
-  // A little deeper gold round the outer rim, for roundness.
-  ctx.strokeStyle = alpha("#e39b2e", 0.55);
-  ctx.lineWidth = r * 0.16;
-  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
-  ctx.restore();
-
-  ctx.strokeStyle = alpha("#5b3a12", 0.75);
-  ctx.lineWidth = Math.max(1.2, r * 0.075);
-  ctx.lineJoin = "round";
-  ctx.stroke(moon);
-
-  // Brightens as it lets the light go.
-  if (release > 0) {
-    ctx.save();
-    ctx.globalAlpha = release * 0.6;
-    ctx.fillStyle = "#fffdf0";
-    ctx.fill(moon, "evenodd");
-    ctx.restore();
-  }
-  ctx.restore();
-
-  // Two sparkles, twinkling out of step: one riding the upper-left shoulder,
-  // one tucked inside the curve.
-  const twinkle = (k: number) => 0.8 + 0.25 * Math.sin(time * 2.6 + k * 2.1);
-  for (const [sx, sy, sr, k] of [[-r * 0.95, -r * 0.62, r * 0.36, 0], [r * 0.52, r * 0.24, r * 0.24, 1]] as const) {
-    ctx.save();
-    ctx.translate(sx, sy);
-    const q = twinkle(k);
-    starPath(ctx, sr * q, sr * q * 0.82, 0.2);
-    ctx.fillStyle = "#ffe066";
-    ctx.fill();
-    ctx.strokeStyle = alpha("#5b3a12", 0.7);
-    ctx.lineWidth = Math.max(1, r * 0.06);
-    ctx.lineJoin = "round";
-    ctx.stroke();
-    ctx.restore();
-  }
-}
-
 function drawMoon(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
   for (const e of v.level.emitters) {
     const px = cx(L, e.x);
@@ -884,10 +972,9 @@ function drawMoon(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
     const r = L.cell * 0.38;
     const bob = Math.sin(v.time * 1.1) * L.cell * 0.035;
     const release = v.sim && v.reveal > 0 && v.reveal < 1.1 ? Math.max(0, 1 - v.reveal * 2.2) : 0;
-
     ctx.save();
     ctx.translate(px, py + bob);
-    drawMoonShape(ctx, r, v.time, release);
+    paintMoon(ctx, r, v.moonLit ?? 0.35, v.time, release, P.moonGlow);
     ctx.restore();
   }
 }
@@ -945,11 +1032,29 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 export function drawIcon(
   ctx: CanvasRenderingContext2D,
   size: number,
-  kind: Tile["kind"],
+  kind: Tile["kind"] | "warp" | "milkyway" | "moon",
   mask?: Light,
   from?: Light,
 ) {
   ctx.clearRect(0, 0, size, size);
+  // The things that are not tiles draw in canvas coordinates.
+  if (kind === "milkyway") {
+    const q = size / 4;
+    drawMilkyWay(ctx, [{ x: q, y: q * 1.4 }, { x: q * 2.4, y: q * 2 }, { x: q * 3, y: q * 2.8 }], size * 0.45, 2);
+    return;
+  }
+  if (kind === "warp") {
+    drawWarpGate(ctx, size * 0.3, size / 2, size * 0.9, true, 0, 0.3, 0);
+    drawWarpGate(ctx, size * 0.7, size / 2, size * 0.9, true, 0, 0.3, 0);
+    return;
+  }
+  if (kind === "moon") {
+    ctx.save();
+    ctx.translate(size * 0.56, size * 0.54);
+    paintMoon(ctx, size * 0.3, 0.3, 0);
+    ctx.restore();
+    return;
+  }
   ctx.save();
   ctx.translate(size / 2, size / 2);
   const s = size * 0.98;
@@ -966,6 +1071,11 @@ export function drawIcon(
     case "star": drawStar(ctx, s, true, 0.4, 0); break;
     case "receptor": drawReceptor(ctx, s, mask ?? WHITE, false, still); break;
     case "wall": drawWall(ctx, s, { kind: "wall" }, still); break;
+    case "asteroid": drawAsteroid(ctx, s, 0.5, 3, false); break;
+    case "satellite": drawSatellitePiece(ctx, s, 0.2, 1, 0); break;
+    case "dish": drawDish(ctx, s, 0.2, 0); break;
+    case "comet": drawCometPiece(ctx, s, 0.3, 0, "active", -Math.PI * 0.75); break;
+    case "terrain": drawTerrain(ctx, s, DEFAULT_THEME.terrain, 5); break;
   }
   ctx.restore();
 }

@@ -10,6 +10,7 @@
 import { Chan, Dir, Level, Tile, WHITE, idx, tileFrom } from "../src/engine/types";
 import { generateCampaignLevel } from "../src/engine/generate";
 import { Game, RevealTick } from "../src/game/state";
+import { scoreRun } from "../src/game/score";
 
 let passed = 0;
 let failed = 0;
@@ -83,6 +84,13 @@ function board(w: number, h: number, col: number): Level {
 
   ok("a winning reveal finishes in a few seconds at 60fps", seconds > 0.5 && seconds < 5,
      `${seconds.toFixed(2)}s`);
+
+  // The points counter that climbs during the reveal must land exactly on the
+  // run's score, or the card and the counter would disagree.
+  const tallied = ticks.reduce((n, t) => n + t.points, 0);
+  const expected = scoreRun(g.current(), g.sim!).total;
+  ok("the live points tally lands exactly on the run's score", tallied === expected && g.runScore === expected,
+     `tallied ${tallied}, runScore ${g.runScore}, expected ${expected}`);
   ok("first-try solve is recognised", g.score().firstTry);
 }
 

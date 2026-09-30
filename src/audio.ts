@@ -381,6 +381,111 @@ export function sfxMiss() {
   bell({ freq: 220, at: 0.15, dur: 0.8, gain: 0.1 });
 }
 
+// ---------------------------------------------------------------- new elements
+
+/**
+ * The warp: hollow and cool. Noise and a falling tone are fed through a comb
+ * filter — a very short delay feeding back into itself — which is the sound of
+ * air resonating in a tube. Sweeping the delay time sweeps the tube's pitch,
+ * so the light sounds like it is being pulled through a pipe under the board.
+ */
+export function sfxWarp(hue = 0) {
+  const c = audioCore();
+  if (!c) return;
+  const { ctx } = c;
+  const t0 = ctx.currentTime;
+  const base = [196, 220, 247, 175][hue % 4];
+
+  const comb = ctx.createDelay(0.05);
+  comb.delayTime.setValueAtTime(1 / base, t0);
+  comb.delayTime.exponentialRampToValueAtTime(1 / (base * 2.2), t0 + 0.55);
+  const feedback = ctx.createGain();
+  feedback.gain.value = 0.86;
+  comb.connect(feedback);
+  feedback.connect(comb);
+
+  const out = ctx.createBiquadFilter();
+  out.type = "bandpass";
+  out.frequency.value = 900;
+  out.Q.value = 0.5;
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, t0);
+  env.gain.exponentialRampToValueAtTime(0.5, t0 + 0.03);
+  env.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.9);
+  comb.connect(out);
+  out.connect(env);
+  env.connect(c.sfxBus);
+
+  const src = ctx.createBufferSource();
+  src.buffer = c.noise;
+  const burst = ctx.createGain();
+  burst.gain.setValueAtTime(0.35, t0);
+  burst.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25);
+  src.connect(burst);
+  burst.connect(comb);
+  src.start(t0, Math.random() * 0.5, 0.3);
+
+  tone({ freq: base * 2, glide: base, dur: 0.5, gain: 0.12, type: "sine" });
+  tone({ freq: base, glide: base * 1.5, at: 0.25, dur: 0.45, gain: 0.1, type: "sine" });
+  window.setTimeout(() => { feedback.disconnect(); comb.disconnect(); }, 1500);
+}
+
+/** A satellite catches the light: a little radio chirp. */
+export function sfxSatelliteUp() {
+  [1318.5, 1760, 1318.5, 2093].forEach((f, k) =>
+    tone({ freq: f, at: k * 0.07, dur: 0.06, gain: 0.07, type: "square" }));
+  noiseHit({ dur: 0.3, gain: 0.03, type: "bandpass", freq: 3000, q: 4 });
+}
+
+/** …and its dish puts it back down. */
+export function sfxSatelliteDown() {
+  [2093, 1760, 1318.5].forEach((f, k) =>
+    tone({ freq: f, at: k * 0.06, dur: 0.07, gain: 0.07, type: "square" }));
+  bell({ freq: 1046.5, at: 0.18, dur: 0.7, gain: 0.16 });
+}
+
+/** Light smashing into an asteroid: a crunch, crackle, and a sorry little fall. */
+export function sfxAsteroid() {
+  noiseHit({ dur: 0.35, gain: 0.35, type: "lowpass", freq: 900, sweepTo: 150 });
+  tone({ freq: 70, glide: 40, dur: 0.3, gain: 0.35, type: "sine" });
+  for (let k = 0; k < 4; k++) noiseHit({ at: 0.03 + k * 0.045, dur: 0.04, gain: 0.08, type: "highpass", freq: 4000 });
+  tone({ freq: 392, glide: 196, at: 0.12, dur: 0.4, gain: 0.1, type: "triangle" });
+}
+
+/**
+ * A piece of a shooting star. The melody climbs with every piece caught, and
+ * catching the last one runs up the scale in a flourish.
+ */
+export function sfxComet(k: number, last: boolean) {
+  const f = rung(7 + k * 2);
+  bell({ freq: f, dur: 1.0, gain: 0.3 });
+  bell({ freq: f * 1.5, at: 0.05, dur: 0.8, gain: 0.12 });
+  noiseHit({ dur: 0.4, gain: 0.05, type: "highpass", freq: 7000, sweepTo: 3000 });
+  if (last) {
+    for (let j = 0; j < 6; j++) bell({ freq: rung(8 + k * 2 + j), at: 0.12 + j * 0.06, dur: 0.8, gain: 0.16 });
+  }
+}
+
+/** A point ticking onto the counter as the light travels — tiny, rising with the count. */
+export function sfxPointTick(n: number, galaxy: boolean) {
+  const f = rung(9 + (n % 6));
+  tone({ freq: f, dur: 0.05, gain: galaxy ? 0.08 : 0.035, type: "sine" });
+  if (galaxy) bell({ freq: f * 2, dur: 0.3, gain: 0.05 });
+}
+
+/** A chunk of points: the coin sound, only made of starlight. */
+export function sfxPoints(big: boolean) {
+  [0, 2, 4].forEach((j, k) => bell({ freq: rung(9 + j), at: k * 0.045, dur: 0.5, gain: big ? 0.18 : 0.12 }));
+  noiseHit({ at: 0.1, dur: 0.3, gain: 0.04, type: "highpass", freq: 8000 });
+}
+
+/** Arriving at a new planet. */
+export function sfxNewWorld() {
+  [0, 4, 7, 11].forEach((st, k) => bell({ freq: 261.63 * Math.pow(2, st / 12), at: k * 0.12, dur: 1.6, gain: 0.18 }));
+  tone({ freq: 65.41, dur: 2.2, gain: 0.24, type: "sine" });
+  noiseHit({ dur: 1.4, gain: 0.05, type: "bandpass", freq: 600, sweepTo: 5000, q: 0.6 });
+}
+
 // ---------------------------------------------------------------- the music hooks
 
 /**

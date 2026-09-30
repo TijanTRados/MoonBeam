@@ -9,9 +9,13 @@
 import { Chan, Dir, Level, Light, Tile, TileKind, WHITE } from "../engine/types";
 import { LIGHT_LABEL } from "../render/theme";
 
+/** Tile kinds, plus the things on a board that are not tiles. */
+export type IconKind = TileKind | "warp" | "milkyway" | "moon";
+
 export type PieceKey =
   | "mirror" | "splitter" | "crystal" | "tint" | "portal"
-  | "blackhole" | "whitehole" | "wall" | "star" | "receptor";
+  | "blackhole" | "whitehole" | "wall" | "star" | "receptor"
+  | "asteroid" | "satellite" | "dish" | "comet" | "terrain" | "warp" | "milkyway";
 
 export interface PieceInfo {
   key: PieceKey;
@@ -21,7 +25,7 @@ export interface PieceInfo {
   /** A few sentences, for the introduction card. */
   detail: string;
   /** The icon to draw for it. */
-  icon: { kind: TileKind; mask?: Light; from?: Light };
+  icon: { kind: IconKind; mask?: Light; from?: Light };
 }
 
 export const INFO: Record<PieceKey, PieceInfo> = {
@@ -100,6 +104,62 @@ export const INFO: Record<PieceKey, PieceInfo> = {
       "too much light fails it just like too little. Dots inside a ring mean it needs " +
       "those colours together, so two beams have to arrive at it.",
     icon: { kind: "receptor", mask: WHITE },
+  },
+  milkyway: {
+    key: "milkyway", name: "Milky Way",
+    short: "Light crossing it shines brighter and scores five times the points.",
+    detail: "A stretch of the Milky Way lies across some cells. It is not a piece — " +
+      "you can build on top of it — but every cell of light that crosses it is worth " +
+      "five times as much. Solving is the goal; routing through here is the style.",
+    icon: { kind: "milkyway" },
+  },
+  comet: {
+    key: "comet", name: "Shooting star",
+    short: "Catch its pieces in order: the big bright one first, then the next lights up.",
+    detail: "A shooting star is broken into numbered pieces. Only the big, bright one " +
+      "can be caught; when light reaches it, the star leaps to the next piece and that " +
+      "one lights up. Catch every piece, in order, in a single shine — the tune climbs " +
+      "with each one. Light passing a piece before its turn does nothing.",
+    icon: { kind: "comet" },
+  },
+  terrain: {
+    key: "terrain", name: "Rough ground",
+    short: "Light crosses it, but nothing can be built on it.",
+    detail: "Broken, rocky ground. Light passes over it freely, but there is nowhere " +
+      "to stand a piece — so the obvious spot for a mirror may not be available.",
+    icon: { kind: "terrain" },
+  },
+  warp: {
+    key: "warp", name: "Warp",
+    short: "A row or column whose ends are joined: leave one gate, come back in the other.",
+    detail: "Matching coloured gates on opposite edges of the board mark a warp. Light " +
+      "leaving through one gate is pulled through a tunnel under the board and comes " +
+      "back in through the other, still travelling the same way.",
+    icon: { kind: "warp" },
+  },
+  asteroid: {
+    key: "asteroid", name: "Asteroid",
+    short: "Drifts back and forth and smashes any light it meets. Costs points.",
+    detail: "Asteroids drift along a lane, and light that hits one is broken — and " +
+      "costs you points. Light takes time to cross the board, so whether an asteroid " +
+      "is in the way depends on the moment you press Shine. Watch it, and pick your moment.",
+    icon: { kind: "asteroid" },
+  },
+  satellite: {
+    key: "satellite", name: "Satellite",
+    short: "Catches light and beams it down at its dish, a moment later.",
+    detail: "A satellite catches light and carries it to its dish, which sends it on in " +
+      "the same direction. The trip takes time — the dots show how many ticks — so by " +
+      "the time the light comes back down, anything moving has moved.",
+    icon: { kind: "satellite" },
+  },
+  dish: {
+    key: "dish", name: "Dish",
+    short: "Where a satellite puts its light back down. Otherwise light passes through.",
+    detail: "The ground station for a satellite. Light the satellite carries is released " +
+      "here, still travelling the way it was going. Light that wanders in directly " +
+      "just passes through.",
+    icon: { kind: "dish" },
   },
 };
 
@@ -193,6 +253,45 @@ export function demoLevel(k: PieceKey): Level {
       l = board(3, 3, 1);
       put(l, 1, 2, { kind: "receptor", mask: WHITE });
       return l;
+    case "milkyway":
+      l = board(3, 3, 1);
+      l.galaxy = [0, 1, 2, 3, 4, 5];
+      put(l, 1, 2, { kind: "receptor", mask: WHITE });
+      return l;
+    case "comet":
+      l = board(4, 3, 1);
+      put(l, 1, 1, { kind: "comet", seq: 0 });
+      put(l, 1, 2, { kind: "mirrorB" });
+      put(l, 2, 2, { kind: "comet", seq: 1 });
+      put(l, 3, 2, { kind: "receptor", mask: WHITE });
+      return l;
+    case "terrain":
+      l = board(3, 3, 1);
+      put(l, 0, 1, { kind: "terrain" });
+      put(l, 1, 1, { kind: "terrain" });
+      put(l, 2, 1, { kind: "terrain" });
+      put(l, 1, 2, { kind: "receptor", mask: WHITE });
+      return l;
+    case "warp":
+      // Down into a mirror, off the right edge, back in from the left, and
+      // round the mirror's other face into the ring.
+      l = board(4, 3, 1);
+      l.warps = [{ axis: "row", index: 1, hue: 0 }];
+      put(l, 1, 1, { kind: "mirrorB" });
+      put(l, 1, 2, { kind: "receptor", mask: WHITE });
+      return l;
+    case "asteroid":
+      l = board(3, 3, 1);
+      put(l, 0, 1, { kind: "asteroid", track: [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: 1 }], phase: 1 });
+      put(l, 1, 2, { kind: "receptor", mask: WHITE });
+      return l;
+    case "satellite":
+    case "dish":
+      l = board(4, 3, 0);
+      put(l, 0, 1, { kind: "satellite", pair: 1, delay: 1 });
+      put(l, 3, 1, { kind: "dish", pair: 1 });
+      put(l, 3, 2, { kind: "receptor", mask: WHITE });
+      return l;
   }
 }
 
@@ -201,8 +300,11 @@ export function kindsIn(level: Level): PieceKey[] {
   const out = new Set<PieceKey>();
   for (const t of level.tiles) { const k = infoKey(t.kind); if (k) out.add(k); }
   for (const it of level.inventory) { const k = infoKey(it.kind); if (k) out.add(k); }
-  // Introduce things in the order a player would meet them.
-  const order: PieceKey[] = ["receptor", "mirror", "wall", "star", "splitter", "crystal",
-    "tint", "portal", "blackhole", "whitehole"];
+  if (level.warps?.length) out.add("warp");
+  if (level.galaxy?.length) out.add("milkyway");
+  // Introduce things in the order a player would meet them. The dish is
+  // explained on the satellite's card.
+  const order: PieceKey[] = ["receptor", "mirror", "wall", "star", "milkyway", "splitter", "crystal",
+    "tint", "comet", "portal", "terrain", "warp", "blackhole", "whitehole", "asteroid", "satellite"];
   return order.filter((k) => out.has(k));
 }

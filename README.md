@@ -18,6 +18,14 @@ crystals and tints so the light reaches every ring — passing through every sta
 on the way. Rings must be hit by **exactly** their colour, so light is a resource to be
 separated, recombined and spent carefully rather than just aimed.
 
+The campaign is a journey outward — **Earth, Venus, Mercury, Mars, Jupiter,
+Saturn, Uranus, Neptune, and finally a black hole** — ten nights per world, each
+with its own sky, its own song and its own new element. Along the way there are
+shooting stars to catch in order, the Milky Way to route through for points,
+asteroids to time around, satellites that hold the light, and warps that fold
+the board's edges together. The **Galaxy** is a sandbox with every element in
+it and no rules.
+
 Every level is generated, verified and difficulty-rated at runtime. There is no
 level file anywhere in this repository.
 
@@ -128,22 +136,33 @@ in the difficulty model, "shortest found" is not good enough; it has to be the
 genuine minimum. Trying depth 1, then 2, and stopping at the first depth that
 yields anything makes par correct by construction.
 
-### Teaching order
+### Worlds, and teaching order
 
 Difficulty is not only how much there is to do — it is which ideas are in play.
 Some are gated rather than scaled, because meeting them cold is not a challenge,
-it is a bug report:
+it is a bug report. The campaign is split into **worlds** of ten nights
+(`src/engine/phases.ts`). Each world decides which elements may appear at all,
+how hard its nights ramp, and which new elements it introduces — and a new
+element is *required* on its introduction night, so the player meets exactly one
+new idea at a time, with its explanation card.
 
-| Idea | First appears |
-|---|---|
-| Splitters | difficulty 3 |
-| The crystal, and colour | difficulty 4 |
-| Tints | difficulty 5 |
-| Jumps — portals and black holes | difficulty 6 |
-| Rings needing **two converging beams** | difficulty 6 |
-| Moving shutters, and timing | difficulty 7 |
+| Nights | World | New here |
+|---|---|---|
+| 1–10 | Earth | mirrors and rings; then stars, the Milky Way, splitters |
+| 11–20 | Venus | crystals, tints |
+| 21–30 | Mercury | shooting stars, portals |
+| 31–40 | Mars | rough ground, warps, black holes, rings needing two beams |
+| 41–50 | Jupiter | asteroids — the moment you press Shine starts to matter |
+| 51–60 | Saturn | satellites, moving walls |
+| 61–80 | Uranus, Neptune | everything, harder |
+| 81+ | The Black Hole | everything, hardest, forever |
 
-That last one was added after a playtest report that "night 7 is broken, the red
+Difficulty ramps across each world and steps back a little at the start of the
+next: new rules should be taught before they are tested. The moon waxes across
+each world's ten nights — a thin crescent on the first, full on the tenth — so
+it doubles as a progress marker.
+
+The two-beam rule in that table was added after a playtest report that "night 7 is broken, the red
 receptor never triggers". The level was fine; the ring was magenta, needing red
 *and* blue to arrive together, and nothing had taught that. Holding it back —
 and drawing the required channels as dots inside the ring — was the fix.
@@ -152,18 +171,12 @@ and drawing the required channels as dots inside the ring — was the fix.
 
 Difficulty is a **linear model fitted to generator features**, not hand-picked
 weights. The generator is asked for a target, and the features of what it
-produces — par, branching, colours, receptors, stars, decoys, moving parts,
+produces — fewest pieces, branching, colours, receptors, stars, decoys, moving parts,
 search resistance, solution count — scale cleanly with that target. So the target
 is treated as a ground-truth label and a least-squares fit gives the weights:
 
 ```
-Fit on 601 generated levels:  R² = 0.972,  RMSE = 0.50
-
-  target  1 → 1.3     target  6 → 5.5
-  target  2 → 1.8     target  7 → 7.4
-  target  3 → 2.6     target  8 → 7.5
-  target  4 → 4.3     target  9 → 9.6
-  target  5 → 5.1     target 10 → 9.6
+Fit on 658 generated levels:  R² = 0.977,  RMSE = 0.45
 ```
 
 Re-run `npx tsx tools/fit-difficulty.ts` and paste the output into `solver.ts`
@@ -180,8 +193,8 @@ Don't read individual coefficients as design guidance.
 
 Everything is driven by a seeded PRNG, so a level is fully described by its seed
 and target difficulty. Nothing needs to be stored or shipped — **an endless
-campaign is a counter.** `campaignDifficulty(n)` is a logarithmic ramp with a
-small sawtooth so the curve breathes instead of grinding upward.
+campaign is a counter.** `campaignDifficulty(n)` follows the worlds' ramps, with
+a small sawtooth so the curve breathes instead of grinding upward.
 
 Generating a night takes **3–190 ms**, so it happens on demand.
 
@@ -203,6 +216,12 @@ Four directions, and light is an RGB bitmask (white = R|G|B).
 | **Ring** ◎ | The goal. Needs an **exact** colour match; beams accumulate additively, and a ring needing two channels shows them as dots inside it. |
 | **Portal** ◉ | Teleports, preserving direction. Works both ways. |
 | **Black hole** ● / **White hole** ○ | Light falls into the black hole and out of its white hole, still travelling the same way. **One-way** — that asymmetry is why both exist. |
+| **Shooting star** ☄ | Numbered pieces, transparent. Only the active (big) piece can be caught; catching it makes the next one active. All pieces, in order, in one shine. |
+| **Milky Way** | Not a piece — a patch of cells. Light crossing it scores five times as much. |
+| **Warp** | A row or column whose ends are joined by coloured gates: out one side, back in the other, same direction. |
+| **Rough ground** | Transparent to light, but nothing can be built on it. |
+| **Asteroid** | Drifts along a lane and breaks any beam it meets, costing points. |
+| **Satellite** / **dish** | The satellite catches light and its dish releases it `delay` ticks later — by which time asteroids have moved. |
 
 Two properties fall out of this that are worth knowing:
 
@@ -214,9 +233,22 @@ Two properties fall out of this that are worth knowing:
   `(cell, direction, colour)`, terminates those loops — this is the modern form
   of the thesis's `life` countdown.
 
-Stars bank across ticks, but every receptor must be lit on the **same** tick.
-With no moving parts that collapses to a single tick and behaves exactly like the
-static game.
+**Light takes time.** It crosses six cells per tick of board time, and the
+board's clock keeps running while you build — asteroids drift and walls slide
+in front of you. Shine fires the light at the moment you press it, and one
+firing must light every ring, every star and the whole shooting star. With
+nothing moving, every moment is the same and it plays like the static game.
+The generator checks every level against this exact rule by replaying it.
+
+### Points
+
+Solving is the goal; points are how well you solved it (`src/game/score.ts`).
+Every cell of light earns a little, the Milky Way five times as much; stars,
+rings and each shooting-star piece add more, a whole shooting star a bonus on
+top. Asteroids cost. The card then compares your piece count with the **fewest
+possible** (found by the solver): matching it earns a bonus, every extra piece
+costs points. The counter over the board climbs with the beam, and is tested to
+land exactly on the run's score.
 
 ---
 
@@ -238,8 +270,9 @@ choreographed so the result is something you watch arrive.
   the way, a shockwave across the board, every beam flaring white, the board
   leaning towards you, sparks out of every ring — and the collected stars and rings
   joined up as a constellation, the board's own star map of what you did.
-- **The result says what was special.** Stars pop onto the card one at a time, and
-  badges call out a first-try solve, par, and streaks.
+- **The result says what was special.** Stars pop onto the card one at a time,
+  badges call out a first-try solve, the fewest possible pieces, and streaks, and
+  the points count up — with your best per night remembered.
 
 The music is part of it. It runs through its own low-pass filter, which opens as
 the beam travels and is thrown wide at the moment of solving — a single knob that
@@ -255,10 +288,15 @@ Everything is synthesised with the Web Audio API — no audio files. Sound effec
 use the C-major pentatonic, which has no wrong notes against the music, so a chime
 can land on any beat and still sound intended.
 
-The music is an original 16-bar loop in the style of late-90s bubblegum pop:
-bouncy octave bass, a clap on two and four, syncopated chord stabs, and a
-glockenspiel arpeggio doing the sparkle. It borrows the genre's instrumentation,
-not anybody's melody — the hook was written here from its own chord tones. Notes
+Each world has its own original 16-bar loop, played by the same little synth
+band so it feels like one radio station changing records. Earth is bouncy
+late-90s bubblegum pop — octave bass, a clap on two and four, syncopated stabs,
+a glockenspiel doing the sparkle; the further out you go, the slower, sparser
+and colder it gets, until the black hole is a heartbeat and a drone. They borrow
+the genre's instrumentation, not anybody's melody — every hook is built from its
+own chord tones. Songs change at a bar line, never mid-beat. Warps whoosh
+through a comb filter (air resonating in a tube), satellites chirp, asteroids
+crunch, and each shooting-star piece rings a step higher than the last. Notes
 are scheduled on the audio clock, not timers, so the groove stays tight while a
 level is generating. Sound and music have separate switches, both remembered.
 
@@ -275,7 +313,7 @@ the picture can never contradict the words.
 ```bash
 npm install
 npm run dev      # http://localhost:5273
-npm test         # 39 engine + generator assertions
+npm test         # engine, reveal, elements, worlds and sandbox tests
 npm run build    # → dist/
 ```
 
@@ -287,8 +325,12 @@ npx tsx tools/fit-difficulty.ts         # re-fit the difficulty model
 npx tsx tools/profile.ts                # time the hot paths
 ```
 
-In dev, `window.mb` is exposed: `mb.go(14)` jumps to a night, `mb.solveIt()`
-lays down the stored solution, `mb.level()` dumps the board.
+To play any night without earning your way there, tick **Open all** on the
+Nights screen.
+
+In dev, `window.mb` is exposed: `mb.go(14)` jumps to a night, `mb.galaxy()`
+opens the sandbox, `mb.solveIt()` lays down the stored solution, `mb.level()`
+dumps the board.
 
 ### Android
 
@@ -306,13 +348,21 @@ legacy-2015/      the original Android app, kept unchanged — see its README
 src/
   engine/          pure, no DOM — the part the generator runs thousands of times
     types.ts         directions, light masks, tiles, levels
-    simulate.ts      beam propagation; loop termination; movement ticks
+    simulate.ts      beam propagation; light speed; loop termination; movement ticks
     solver.ts        frontier-pruned iterative deepening; difficulty model
     generate.ts      construct → excavate → verify → tighten → rate
+    phases.ts        the worlds: what each allows, introduces, and how hard it ramps
   render/          canvas drawing; everything procedural, no sprite sheets
+    moon.ts          the moon at any phase — only what is lit
+    themes.ts        each world's sky, planet and constellations
+    elements.ts      asteroids, satellites, shooting stars, warps, the Milky Way
   game/            the bridge between engine and DOM
+    score.ts         points
+    sandbox.ts       the Galaxy
+  audio.ts         synthesised sound effects
+  music.ts         the worlds' songs
   main.ts          screens, input, render loop
-test/engine.test.ts
+test/
 tools/
 ```
 
