@@ -646,3 +646,22 @@ body { -webkit-user-select: none; user-select: none; touch-action: manipulation;
 .text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(200, 166, 255, 0.2); }
 .join-error { color: #ff8a7a; font-size: 13px; min-height: 1.2em; margin: 6px 0 0; }
 body .text-input { -webkit-user-select: text; user-select: text; }
+
+/* ------------------------------------------------------------- stardust */
+
+.chip {
+  height: 36px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid rgba(255, 224, 102, 0.35); background: rgba(255, 224, 102, 0.1);
+  color: #ffe066; font: 800 14px Nunito, sans-serif; cursor: pointer; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.chip[hidden] { display: none; }
+.dust { color: #ffe066; }
+.win-dust { margin: 10px 0 0; color: #ffe066; font-weight: 800; min-height: 0; }
+.win-dust:empty { display: none; }
+.boost-list { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 10px; }
+.boost-list li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: var(--panel); }
+.boost-list li div { flex: 1; display: grid; gap: 2px; font-size: 13.5px; }
+.boost-list li span { color: var(--ink-dim); }
+.btn-cost { flex: none; min-width: 72px; padding: 10px 12px; }
+.btn-cost:disabled { opacity: 0.4; cursor: default; }

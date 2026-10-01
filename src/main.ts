@@ -13,6 +13,7 @@ import { Game, loadProgress, saveProgress, Progress, RevealTick } from "./game/s
 import { INFO, PieceKey, demoLevel, describe, infoKey, kindsIn } from "./game/info";
 import { bonuses } from "./game/score";
 import { TOOLS, TOOL_TIPS, sandboxLevel, sandboxTap } from "./game/sandbox";
+import { BOOSTERS, BoosterKey, applicable, earned as dustFor } from "./game/stardust";
 import {
   DailyResult, WEEKDAY_NAMES, dailyMoon, dailyWorld, formatTime, generateDaily, levelHash, liveStreak,
   nextStreak, shareText, todayNumber, weekday,
@@ -198,6 +199,11 @@ function beginRun() {
   climaxCell = -1;
   lastFront = 0;
   pointTicks = 0;
+  if (game.timingAid && game.moving) {
+    const t = game.nextWinningTick();
+    if (t === null) toast("No moment works with these pieces — something needs to change.", 2600);
+    else game.clock = t;
+  }
   sfxShine();
   musicBrightness(0.62, 0.6);
   game.start();
@@ -513,6 +519,64 @@ function renderSkip() {
   b.hidden = !game || sandbox || endless || !!dailyN || game.misses < 5 || game.phase === "won";
 }
 
+// ---------------------------------------------------------------- stardust
+
+let dustGained = 0;
+
+function renderDust() {
+  for (const el of $$(".dust-count")) el.textContent = String(progress.stardust);
+}
+
+/** The booster sheet: what each does, what it costs, and whether it can help here. */
+function openBoosters() {
+  if (!game || sandbox || game.phase === "running") return;
+  const g = game;
+  $("#boost-balance").textContent = String(progress.stardust);
+  const list = $("#boost-list");
+  list.innerHTML = "";
+  for (const b of BOOSTERS) {
+    const can = applicable(b.key, g.current(), g.decoys, g.nextPiece) && !(b.key === "timing" && g.timingAid);
+    const afford = progress.stardust >= b.cost;
+    const li = document.createElement("li");
+    li.innerHTML = `<div><b>${b.name}</b><span>${b.key === "timing" && g.timingAid ? "On for this night." : b.blurb}</span></div>`;
+    const btn = document.createElement("button");
+    btn.className = "btn btn-primary btn-cost";
+    btn.textContent = `✦ ${b.cost}`;
+    btn.disabled = !can || !afford;
+    btn.title = !can ? "Nothing for it to do here" : !afford ? "Not enough stardust" : "";
+    btn.dataset.action = "boost";
+    btn.dataset.boost = b.key;
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+  $("#boost-card").hidden = false;
+  sfxInfo();
+}
+
+function useBooster(key: BoosterKey) {
+  if (!game) return;
+  const b = BOOSTERS.find((x) => x.key === key)!;
+  if (progress.stardust < b.cost) return;
+  let ok = false;
+  if (key === "place") {
+    const i = game.placeNext();
+    ok = i >= 0;
+    if (ok) { spawnFx(i, "place", now()); sfxPlace(); }
+  } else if (key === "sweep") {
+    ok = game.sweepDecoys() > 0;
+    if (ok) { sfxRemove(); toast("Decoys swept away.", 1800); }
+  } else if (key === "timing") {
+    ok = game.moving && !game.timingAid;
+    if (ok) { game.timingAid = true; sfxHint(); toast("Shine will wait for a moment that works.", 2200); }
+  }
+  $("#boost-card").hidden = true;
+  if (!ok) return;
+  progress.stardust -= b.cost;
+  saveProgress(progress);
+  renderDust();
+  renderTray();
+}
+
 /** The points counter over the board. */
 function renderScore() {
   const el = $("#score");
@@ -615,6 +679,9 @@ function onSettled() {
     const firstTry = s.firstTry;
     const total = s.points + bonuses(s.used, s.par, s.firstTry).reduce((n, b) => n + b.points, 0);
     let newBest = false;
+    // Only a first solve earns stardust, so nothing can be farmed.
+    const first = dailyN ? !progress.daily[dailyN]
+      : !endless && !sandbox && progress.best[night] === undefined;
     if (dailyN) {
       newBest = !progress.daily[dailyN];
       recordDaily(s, total);
@@ -628,7 +695,10 @@ function onSettled() {
     }
     progress.streak = firstTry ? progress.streak + 1 : 0;
     progress.bestStreak = Math.max(progress.bestStreak, progress.streak);
+    dustGained = endless ? 0 : dustFor({ first, points: total, daily: !!dailyN, streak: progress.dailyStreak });
+    progress.stardust += dustGained;
     saveProgress(progress);
+    renderDust();
 
     // Join up what the light found, like a star map, then show the card once
     // the board has had a moment to itself.
@@ -954,6 +1024,7 @@ function startLevel(n: number, isEndless = false) {
     if (currentScreen !== "game" || night !== n) return;
 
     game = new Game(gen.level);
+    $("[data-action=boosters]").hidden = false;
     $("[data-action=hint]").classList.remove("nudge");
     renderSkip();
     winGlow = 0;
@@ -996,6 +1067,7 @@ function startDaily() {
     if (!level) { level = generateDaily(n).level; dailyCache.set(n, level); }
     if (currentScreen !== "game" || dailyN !== n) return;
     game = new Game(level);
+    $("[data-action=boosters]").hidden = false;
     $("[data-action=hint]").classList.remove("nudge");
     renderSkip();
     winGlow = 0; flare = 0; climaxed = false;
@@ -1066,6 +1138,7 @@ function startSandbox() {
   clearFx(); boardFx.clear();
   $("#win").hidden = true;
   $("#level-name").textContent = "The Galaxy";
+  $("[data-action=boosters]").hidden = true;
   $("#level-meta").innerHTML = "<span>every element · build anything</span>";
   show("game");
   renderTray();
@@ -1162,6 +1235,7 @@ function showWin(s: ReturnType<Game["score"]>, points: number, newBest: boolean)
     .map((b, k) => `<span class="badge" style="animation-delay:${0.5 + k * 0.15}s">${b}</span>`)
     .join("");
 
+  $("#win-dust").textContent = dustGained > 0 ? `✦ +${dustGained} stardust` : "";
   const rows = [{ label: "This run", points: s.points }, ...bonuses(s.used, s.par, s.firstTry)];
   $("#win-points").innerHTML =
     rows.map((r, k) =>
@@ -1329,6 +1403,9 @@ document.addEventListener("click", (e) => {
     case "play": startLevel(progress.unlocked); break;
     case "nights": show("nights"); break;
     case "galaxy": startSandbox(); break;
+    case "boosters": openBoosters(); break;
+    case "boost": useBooster(el.dataset.boost as BoosterKey); break;
+    case "close-boosters": $("#boost-card").hidden = true; break;
     case "ranks":
       ranksTab = "daily";
       ranksNight = Math.max(1, progress.unlocked - 1);
@@ -1464,6 +1541,10 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); ($("[data-action=world-ok]") as HTMLElement).click(); }
     return;
   }
+  if (!$("#boost-card").hidden) {
+    if (e.key === "Escape") $("#boost-card").hidden = true;
+    return;
+  }
   if (!$("#piece-card").hidden) {
     if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); nextCard(); }
     return;
@@ -1495,6 +1576,7 @@ function renderToggles() {
 }
 
 renderToggles();
+renderDust();
 show("title");
 void flushPending();
 requestAnimationFrame(frame);

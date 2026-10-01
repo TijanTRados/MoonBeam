@@ -77,6 +77,10 @@ export class Game {
   hintGhost = new Map<number, Tile>();
   /** Hints taken on this level. Any at all makes a solve "assisted". */
   hintsUsed = 0;
+  /** Boosters used on this level. Like hints, any at all makes it assisted. */
+  boostersUsed = 0;
+  /** Perfect timing: Shine waits for a moment that works. */
+  timingAid = false;
   /** Times Shine has been pressed on this level. One means solved first try. */
   runs = 0;
   /** Shines on this level that did not solve it. */
@@ -144,6 +148,8 @@ export class Game {
     this.runs = 0;
     this.misses = 0;
     this.hintsUsed = 0;
+    this.boostersUsed = 0;
+    this.timingAid = false;
     // Hints belong to the level, not to the board: Clear keeps them.
     this.hint.clear();
     this.hintGhost.clear();
@@ -530,6 +536,99 @@ export class Game {
     return "what";
   }
 
+  // ---------------------------------------------------------------- boosters
+
+  /** Pieces in the tray the known solution has no use for. */
+  get decoys(): number {
+    const need = new Map<string, number>();
+    for (const p of this.level.solution ?? []) {
+      const k = poolKey(p.kind, p.mask, p.from);
+      need.set(k, (need.get(k) ?? 0) + 1);
+    }
+    return this.tray.reduce((n, s) => n + Math.max(0, s.total - (need.get(s.key) ?? 0)), 0);
+  }
+
+  /** Is there a solution piece not yet in place? */
+  get nextPiece(): boolean {
+    return (this.level.solution ?? []).some((p) => !this.isRight(p));
+  }
+
+  /**
+   * Place the next piece of the known solution, following the light. If the
+   * tray has run out of that piece, one placed somewhere it doesn't belong
+   * is picked up first. Returns the cell, or -1.
+   */
+  placeNext(): number {
+    if (this.phase === "running") return -1;
+    const sol = this.level.solution ?? [];
+    const p = sol.find((q) => !this.isRight(q));
+    if (!p) return -1;
+    const key = poolKey(p.kind, p.mask, p.from);
+    const slot = this.tray.find((s) => s.key === key);
+    if (!slot) return -1;
+
+    // Whatever the player put in that cell goes back to the tray.
+    const here = this.board[p.i];
+    if (here.placed) {
+      const back = this.slotFor(here.kind, here.mask, here.from);
+      if (back) back.used--;
+      this.board[p.i] = { kind: "empty" };
+    }
+    if (slot.used >= slot.total) {
+      const wrong = this.board.findIndex((t, i) => t.placed && poolKey(t.kind, t.mask, t.from) === key &&
+        !sol.some((q) => q.i === i && this.isRight(q)));
+      if (wrong < 0) return -1;
+      this.board[wrong] = { kind: "empty" };
+      slot.used--;
+    }
+    this.board[p.i] = tileFrom(p, true);
+    slot.used++;
+    this.boostersUsed++;
+    this.invalidate();
+    return p.i;
+  }
+
+  /** Take the decoys out of the tray. Placed decoys go back first. */
+  sweepDecoys(): number {
+    const need = new Map<string, number>();
+    for (const p of this.level.solution ?? []) {
+      const k = poolKey(p.kind, p.mask, p.from);
+      need.set(k, (need.get(k) ?? 0) + 1);
+    }
+    const before = this.decoys;
+    for (const s of this.tray) {
+      const keep = need.get(s.key) ?? 0;
+      // Pick up any of this kind beyond what is kept, wrong ones first.
+      while (s.used > keep) {
+        const sol = this.level.solution ?? [];
+        let i = this.board.findIndex((t, j) => t.placed && poolKey(t.kind, t.mask, t.from) === s.key &&
+          !sol.some((q) => q.i === j && this.isRight(q)));
+        if (i < 0) i = this.board.findIndex((t) => t.placed && poolKey(t.kind, t.mask, t.from) === s.key);
+        if (i < 0) break;
+        this.board[i] = { kind: "empty" };
+        s.used--;
+      }
+      s.total = Math.min(s.total, keep);
+    }
+    this.tray = this.tray.filter((s) => s.total > 0);
+    this.selected = Math.min(this.selected, Math.max(0, this.tray.length - 1));
+    if (before > 0) { this.boostersUsed++; this.invalidate(); }
+    return before;
+  }
+
+  /**
+   * The first tick from now at which the board as it stands would win, within
+   * one full cycle of everything moving — or null if no moment works.
+   */
+  nextWinningTick(): number | null {
+    const lv = this.current();
+    const from = this.fireTick;
+    for (let t = from; t < from + Math.max(1, this.cycle); t++) {
+      if (wins(lv, simulate(lv, t))) return t;
+    }
+    return null;
+  }
+
   /** Hinted cells that still need something done to them. */
   get openHints(): Set<number> {
     const sol = this.level.solution ?? [];
@@ -557,9 +656,9 @@ export class Game {
       totalStars: this.outcome?.totalStars ?? 0,
       par: this.level.par ?? 0,
       used: this.used,
-      firstTry: this.runs === 1 && this.hintsUsed === 0,
+      firstTry: this.runs === 1 && this.hintsUsed === 0 && this.boostersUsed === 0,
       points: this.runScore,
-      assisted: this.hintsUsed > 0,
+      assisted: this.hintsUsed > 0 || this.boostersUsed > 0,
     };
   }
 }
@@ -588,6 +687,8 @@ export interface Progress {
   openAll: boolean;
   /** Nights skipped rather than solved; they can be come back to any time. */
   skipped: number[];
+  /** Earned by solving, spent on boosters. */
+  stardust: number;
   /** Daily puzzle number -> the first solve of it. */
   daily: Record<number, DailyResult>;
   dailyStreak: number;
@@ -599,7 +700,7 @@ export interface Progress {
 export function loadProgress(): Progress {
   const fresh: Progress = {
     unlocked: 1, stars: {}, best: {}, runSeed: 1, streak: 0, bestStreak: 0, seen: [], phasesSeen: [], openAll: false, skipped: [],
-    daily: {}, dailyStreak: 0, dailyBestStreak: 0, lastDaily: 0,
+    stardust: 10, daily: {}, dailyStreak: 0, dailyBestStreak: 0, lastDaily: 0,
   };
   try {
     const raw = localStorage.getItem(KEY);

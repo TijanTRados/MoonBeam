@@ -214,6 +214,20 @@ the moon waxes through the week to match. Solving it moves a day streak on; the
 share card shows one moon per Shine — dark for a miss, full for the solve — with
 points, pieces and time, and never the board.
 
+### Getting unstuck, and stardust
+
+Hints are free and come in two steps per piece, following the light: first the
+cell pulses (*where*), then a faint ghost of the right piece appears (*what*).
+After three missed Shines the hint button glows; after five, a night can be
+skipped and come back to later.
+
+**Stardust** is earned by solving a night for the first time and from the
+daily puzzle (more the longer the streak), and spent on boosters that do a
+step for you: *place a piece*, *sweep decoys* out of the tray, or *perfect
+timing* — Shine waits for a moment that works when things are moving. Any hint
+or booster makes a solve "assisted": it still counts for progress, but it is
+not ranked. Stardust can buy your way past a night, never up a leaderboard.
+
 ### Leaderboards
 
 Three boards: **today's daily**, **each campaign night**, and the **Moon ladder**

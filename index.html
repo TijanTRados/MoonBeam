@@ -90,6 +90,7 @@
       </div>
       <button class="icon-btn" data-action="music" aria-label="Turn music off">🎵</button>
       <button class="icon-btn" data-action="mute" aria-label="Turn sounds off">🔊</button>
+      <button class="chip" data-action="boosters" aria-label="Stardust boosters">✦ <span class="dust-count">0</span></button>
       <button class="icon-btn" data-action="hint" aria-label="Hint">?</button>
     </header>
 
@@ -120,6 +121,7 @@
       <p id="win-sub" class="muted"></p>
       <div id="win-badges" class="win-badges"></div>
       <div id="win-points" class="win-points"></div>
+      <p id="win-dust" class="win-dust"></p>
       <p id="win-rank" class="win-rank" hidden></p>
       <div class="card-actions">
         <button class="btn btn-ghost" data-action="replay">Again</button>
@@ -152,6 +154,20 @@
       <p id="world-new" class="world-new"></p>
       <div class="card-actions">
         <button class="btn btn-primary" data-action="world-ok">Let's go</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- boosters -->
+  <div id="boost-card" class="overlay" hidden>
+    <div class="card card-wide">
+      <h3>Boosters</h3>
+      <p class="muted">You have <b class="dust">✦ <span id="boost-balance">0</span></b> stardust. Hints stay free — boosters do a step
+        for you. Solves with a booster aren't ranked.</p>
+      <ul id="boost-list" class="boost-list"></ul>
+      <p class="muted small">Earn stardust by solving a night for the first time, and from the daily puzzle — more the longer your streak.</p>
+      <div class="card-actions">
+        <button class="btn btn-ghost" data-action="close-boosters">Close</button>
       </div>
     </div>
   </div>
