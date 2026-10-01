@@ -14,6 +14,8 @@ import { INFO, PieceKey, demoLevel, describe, infoKey, kindsIn } from "./game/in
 import { bonuses } from "./game/score";
 import { TOOLS, TOOL_TIPS, sandboxLevel, sandboxTap } from "./game/sandbox";
 import { BOOSTERS, BoosterKey, applicable, earned as dustFor } from "./game/stardust";
+import { MEDALS, constellationOf, medalCount, medalsFor, newMedals } from "./game/medals";
+import { MapLayout, MapWorld, boxAt, drawStarMap, layoutStarMap } from "./render/starmap";
 import {
   DailyResult, WEEKDAY_NAMES, dailyMoon, dailyWorld, formatTime, generateDaily, levelHash, liveStreak,
   nextStreak, shareText, todayNumber, weekday,
@@ -62,7 +64,7 @@ const now = () => performance.now() / 1000;
 
 // ---------------------------------------------------------------- screens
 
-type ScreenName = "title" | "nights" | "game" | "ranks";
+type ScreenName = "title" | "nights" | "game" | "ranks" | "map";
 let currentScreen: ScreenName = "title";
 
 function show(name: ScreenName) {
@@ -72,6 +74,7 @@ function show(name: ScreenName) {
   $(`#screen-${name}`).classList.add("is-active");
   if (name === "nights") renderNights();
   if (name === "ranks") void renderRanks();
+  if (name === "map") openMap();
   if (name === "title") refreshContinue();
 }
 
@@ -170,6 +173,7 @@ function frame(nowMs: number) {
   }
 
   drawTitleArt(t, dt);
+  if (currentScreen === "map") drawMap(t);
   drawCardDemo(t, dt);
   requestAnimationFrame(frame);
 }
@@ -519,6 +523,74 @@ function renderSkip() {
   b.hidden = !game || sandbox || endless || !!dailyN || game.misses < 5 || game.phase === "won";
 }
 
+// ---------------------------------------------------------------- star map
+
+const mapWrap = $("#map-wrap");
+const mapCanvas = $<HTMLCanvasElement>("#map-canvas");
+const mapCtx = mapCanvas.getContext("2d")!;
+let mapWorlds: MapWorld[] = [];
+let mapLayout: MapLayout | null = null;
+let backfill = 0;
+
+/** The worlds reached so far, each with its nights and whatever they have won. */
+function buildMapWorlds(): MapWorld[] {
+  const reach = Math.max(progress.unlocked, ...Object.keys(progress.maps).map(Number), 1);
+  const out: MapWorld[] = [];
+  for (const w of PHASES) {
+    if (w.first > reach) break;
+    const last = Number.isFinite(w.last) ? w.last : Math.max(w.first + 9, reach);
+    const nights = [];
+    for (let n = w.first; n <= last; n++) nights.push({ n, c: progress.maps[n], medals: medalsOf(n) });
+    out.push({ name: w.name, color: THEMES[w.key].planet.body[0], nights });
+  }
+  return out;
+}
+
+function openMap() {
+  mapWorlds = buildMapWorlds();
+  mapLayout = layoutStarMap(mapWrap.clientWidth || 360, mapWorlds);
+  $("#map-spacer").style.height = `${mapLayout.height}px`;
+  renderMapCount();
+  // Nights solved before the star map existed: rebuild their constellations
+  // quietly, one at a time, so opening the map never stalls.
+  window.clearTimeout(backfill);
+  const missing = Object.keys(progress.best).map(Number).filter((n) => n > 0 && !progress.maps[n]);
+  const step = () => {
+    const n = missing.shift();
+    if (n === undefined || currentScreen !== "map") return;
+    progress.maps[n] = constellationOf(generateCampaignLevel(n, progress.runSeed).level);
+    saveProgress(progress);
+    mapWorlds = buildMapWorlds();
+    renderMapCount();
+    backfill = window.setTimeout(step, 30);
+  };
+  backfill = window.setTimeout(step, 200);
+}
+
+function renderMapCount() {
+  const solved = Object.keys(progress.maps).length;
+  let medals = 0;
+  for (let n = 1; n <= progress.unlocked; n++) medals += medalCount(medalsOf(n));
+  $("#map-count").textContent = `${solved} constellation${solved === 1 ? "" : "s"} · ${medals} medal${medals === 1 ? "" : "s"}`;
+}
+
+function drawMap(t: number) {
+  if (!mapLayout) return;
+  const { w, h, dpr } = fitCanvas(mapCanvas);
+  mapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawStarMap(mapCtx, w, h, t, mapWorlds, mapLayout, mapWrap.scrollTop);
+}
+
+mapCanvas.addEventListener("click", (e) => {
+  if (!mapLayout) return;
+  const r = mapCanvas.getBoundingClientRect();
+  const n = boxAt(mapLayout, e.clientX - r.left, e.clientY - r.top + mapWrap.scrollTop);
+  if (!n) return;
+  if (progress.openAll || n <= progress.unlocked) startLevel(n);
+  else toast(`Night ${n} is still ahead of you.`, 1600);
+});
+window.addEventListener("resize", () => { if (currentScreen === "map") openMap(); });
+
 // ---------------------------------------------------------------- stardust
 
 let dustGained = 0;
@@ -679,6 +751,7 @@ function onSettled() {
     const firstTry = s.firstTry;
     const total = s.points + bonuses(s.used, s.par, s.firstTry).reduce((n, b) => n + b.points, 0);
     let newBest = false;
+    wonMedals = [];
     // Only a first solve earns stardust, so nothing can be farmed.
     const first = dailyN ? !progress.daily[dailyN]
       : !endless && !sandbox && progress.best[night] === undefined;
@@ -691,6 +764,10 @@ function onSettled() {
       progress.unlocked = Math.max(progress.unlocked, night + 1);
       newBest = total > (progress.best[night] ?? -Infinity);
       if (newBest) progress.best[night] = total;
+      const had = medalsOf(night);
+      progress.medals[night] = had | medalsFor({ solved: true, used: s.used, par: s.par, firstTry: s.firstTry });
+      wonMedals = newMedals(had, progress.medals[night]).map((m) => `${m.glyph} ${m.name}`);
+      progress.maps[night] = { w: game.level.w, h: game.level.h, pts: game.route() };
       progress.skipped = progress.skipped.filter((n) => n !== night);
     }
     progress.streak = firstTry ? progress.streak + 1 : 0;
@@ -1181,7 +1258,20 @@ function renderMeta(l: Level) {
     `<i class="pip${i < d ? " on" : ""}"></i>`).join("");
   $("#level-meta").innerHTML =
     `<span class="pips" title="Difficulty ${l.difficulty}">${pips}</span>` +
-    `<span title="The fewest pieces this night can be solved with">fewest ${l.par ?? "?"}</span>`;
+    `<span title="The fewest pieces this night can be solved with">fewest ${l.par ?? "?"}</span>` +
+    (night > 0 && !endless ? medalRow(medalsOf(night)) : "");
+}
+
+/** A night's medals, counting nights solved before medals existed as lit. */
+function medalsOf(n: number): number {
+  return progress.medals[n] ?? (progress.best[n] !== undefined || (progress.stars[n] ?? 0) > 0 ? 1 : 0);
+}
+
+let wonMedals: string[] = [];
+
+function medalRow(mask: number): string {
+  return `<span class="medals">${MEDALS.map((m) =>
+    `<i class="${mask & m.bit ? "on" : ""}" title="${m.name}: ${m.how}">${m.glyph}</i>`).join("")}</span>`;
 }
 
 function describeGoal(l: Level): string {
@@ -1227,7 +1317,8 @@ function showWin(s: ReturnType<Game["score"]>, points: number, newBest: boolean)
 
   const badges: string[] = [];
   if (s.firstTry) badges.push("✨ First try");
-  if (s.assisted) badges.push("🔭 With a hint");
+  if (s.assisted) badges.push("🔭 With help");
+  for (const m of wonMedals) badges.push(`🏅 ${m}`);
   if (s.par && s.used < s.par) badges.push("🌙 Fewer than we found!");
   else if (s.par && s.used === s.par) badges.push("🌙 Fewest possible");
   if (progress.streak >= 2) badges.push(`💫 ${progress.streak} in a row`);
@@ -1318,12 +1409,18 @@ function renderNights() {
       label.className = "num";
       label.textContent = String(n);
       btn.appendChild(label);
-      const meta = document.createElement("span");
-      meta.className = "stars";
-      meta.textContent = best !== undefined ? `${"★".repeat(stars)} ${best}`
-        : progress.skipped.includes(n) ? "skipped" : "★".repeat(stars);
-      if (progress.skipped.includes(n)) btn.classList.add("skipped");
-      btn.appendChild(meta);
+      if (progress.skipped.includes(n)) {
+        btn.classList.add("skipped");
+        const meta = document.createElement("span");
+        meta.className = "stars";
+        meta.textContent = "skipped";
+        btn.appendChild(meta);
+      } else {
+        const meta = document.createElement("span");
+        meta.innerHTML = medalRow(medalsOf(n));
+        btn.appendChild(meta.firstElementChild!);
+      }
+      if (best !== undefined) btn.title = `Best ${best} · ${"★".repeat(stars)}`;
       if (!locked) btn.addEventListener("click", () => startLevel(n));
       row.appendChild(btn);
     }
@@ -1403,6 +1500,7 @@ document.addEventListener("click", (e) => {
     case "play": startLevel(progress.unlocked); break;
     case "nights": show("nights"); break;
     case "galaxy": startSandbox(); break;
+    case "map": show("map"); break;
     case "boosters": openBoosters(); break;
     case "boost": useBooster(el.dataset.boost as BoosterKey); break;
     case "close-boosters": $("#boost-card").hidden = true; break;

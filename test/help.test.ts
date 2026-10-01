@@ -5,6 +5,7 @@ import { tileFrom } from "../src/engine/types";
 import { generateCampaignLevel } from "../src/engine/generate";
 import { Game } from "../src/game/state";
 import { earned } from "../src/game/stardust";
+import { constellationOf, medalCount, medalsFor, newMedals } from "../src/game/medals";
 
 let passed = 0;
 let failed = 0;
@@ -122,6 +123,27 @@ ok("a first solve earns some", earned({ first: true, points: 240, daily: false, 
 ok("the daily earns more with a streak, capped at a week",
    earned({ first: true, points: 0, daily: true, streak: 3 }) === 8 &&
    earned({ first: true, points: 0, daily: true, streak: 30 }) === earned({ first: true, points: 0, daily: true, streak: 7 }));
+
+// ---------------------------------------------------------------- medals
+
+ok("no medals for an unsolved night", medalsFor({ solved: false, used: 1, par: 1, firstTry: true }) === 0);
+ok("all three for a clean, fewest solve", medalsFor({ solved: true, used: 2, par: 2, firstTry: true }) === 7);
+ok("an extra piece misses the fewest medal", medalsFor({ solved: true, used: 3, par: 2, firstTry: true }) === 5);
+ok("beating the fewest we found still counts", (medalsFor({ solved: true, used: 1, par: 2, firstTry: false }) & 2) === 2);
+ok("new medals are only the ones not had before", newMedals(1, 7).map((m) => m.name).join() === "Fewest,Clean");
+ok("medals are counted", medalCount(5) === 2 && medalCount(7) === 3);
+
+{
+  const l = generateCampaignLevel(9).level;
+  const c = constellationOf(l);
+  const goals = l.tiles.filter((t) => t.kind === "receptor" || t.kind === "star" || t.kind === "comet").length;
+  const entry = l.emitters[0].y * l.w + l.emitters[0].x;
+  const want = new Set([...l.tiles.flatMap((t, i) => (t.kind === "receptor" || t.kind === "star" || t.kind === "comet" ? [i] : [])),
+    ...l.solution!.map((p) => p.i), entry]);
+  ok("a rebuilt constellation runs from the moon through every piece and goal",
+     c.pts[0] === entry && c.pts.length === want.size && goals > 0);
+  ok("…on the right board", c.w === l.w && c.h === l.h);
+}
 
 console.log(`\n  help: ${passed} passed, ${failed} failed`);
 if (fails.length) {

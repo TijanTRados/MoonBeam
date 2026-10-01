@@ -29,10 +29,15 @@
     <nav class="menu">
       <button class="btn btn-primary" data-action="play">Continue</button>
       <button class="btn btn-daily" data-action="daily">Daily puzzle <small id="daily-sub"></small></button>
-      <button class="btn" data-action="nights">Nights</button>
-      <button class="btn" data-action="endless">Endless</button>
+      <div class="menu-row">
+        <button class="btn" data-action="nights">Nights</button>
+        <button class="btn" data-action="map">Star map</button>
+      </div>
       <button class="btn" data-action="ranks">Leaderboards</button>
-      <button class="btn btn-galaxy" data-action="galaxy">Galaxy <small>every element</small></button>
+      <div class="menu-row">
+        <button class="btn" data-action="endless">Endless</button>
+        <button class="btn btn-galaxy" data-action="galaxy">Galaxy</button>
+      </div>
       <button class="btn btn-quiet" data-action="howto">How to play</button>
     </nav>
     <p class="credit">A 2015 thesis project, rebuilt.<br />Tijan Tomislav Radoš</p>
@@ -53,6 +58,22 @@
       </label>
     </header>
     <div id="night-grid" class="night-grid"></div>
+  </section>
+
+  <!-- ---------------------------------------------------------- star map -->
+  <section id="screen-map" class="screen">
+    <header class="bar">
+      <button class="icon-btn" data-action="home" aria-label="Back">‹</button>
+      <div class="bar-title">
+        <h2>Star map</h2>
+        <div id="map-count" class="meta"></div>
+      </div>
+      <span class="bar-spacer"></span>
+    </header>
+    <div id="map-wrap" class="map-wrap">
+      <canvas id="map-canvas" class="map-canvas" aria-label="Every solved night, as a constellation"></canvas>
+      <div id="map-spacer"></div>
+    </div>
   </section>
 
   <!-- ---------------------------------------------------------- leaderboards -->

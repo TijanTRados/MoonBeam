@@ -12,6 +12,7 @@ import {
 import { poolKey } from "../engine/solver";
 import { POINTS, segmentPoints } from "./score";
 import type { DailyResult } from "./daily";
+import type { Constellation } from "./medals";
 
 export type Phase = "build" | "running" | "won" | "lost";
 
@@ -511,6 +512,21 @@ export class Game {
     return pts.sort((a, b) => (this.eventOrder(a) ?? 0) - (this.eventOrder(b) ?? 0));
   }
 
+  /**
+   * The route as a constellation, for the star map: where the moon's light
+   * came in, then every piece and goal it touched, in the order it got there.
+   */
+  route(): number[] {
+    if (!this.sim) return [];
+    const lv = this.current();
+    const cells = new Set(this.constellation());
+    this.board.forEach((t, i) => { if (t.placed && this.firstArrival.has(i)) cells.add(i); });
+    const entry = lv.emitters.map((e) => e.y * lv.w + e.x);
+    const rest = [...cells].filter((i) => !entry.includes(i))
+      .sort((a, b) => (this.eventOrder(a) ?? 0) - (this.eventOrder(b) ?? 0));
+    return [...entry, ...rest];
+  }
+
   /** Is the piece the known solution wants at this placement already there, exactly? */
   private isRight(p: { i: number; kind: TileKind; mask?: Light; from?: Light }): boolean {
     const cur = this.board[p.i];
@@ -689,6 +705,10 @@ export interface Progress {
   skipped: number[];
   /** Earned by solving, spent on boosters. */
   stardust: number;
+  /** night -> medals won (a bitmask; see medals.ts). */
+  medals: Record<number, number>;
+  /** night -> its constellation, for the star map. */
+  maps: Record<number, Constellation>;
   /** Daily puzzle number -> the first solve of it. */
   daily: Record<number, DailyResult>;
   dailyStreak: number;
@@ -700,7 +720,7 @@ export interface Progress {
 export function loadProgress(): Progress {
   const fresh: Progress = {
     unlocked: 1, stars: {}, best: {}, runSeed: 1, streak: 0, bestStreak: 0, seen: [], phasesSeen: [], openAll: false, skipped: [],
-    stardust: 10, daily: {}, dailyStreak: 0, dailyBestStreak: 0, lastDaily: 0,
+    stardust: 10, medals: {}, maps: {}, daily: {}, dailyStreak: 0, dailyBestStreak: 0, lastDaily: 0,
   };
   try {
     const raw = localStorage.getItem(KEY);

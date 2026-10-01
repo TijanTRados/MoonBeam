@@ -228,6 +228,15 @@ timing* — Shine waits for a moment that works when things are moving. Any hint
 or booster makes a solve "assisted": it still counts for progress, but it is
 not ranked. Stardust can buy your way past a night, never up a leaderboard.
 
+### Medals and the star map
+
+Every night has three medals — ☾ *lit* (solve it), ✦ *fewest* (with the fewest
+pieces possible) and ☄ *clean* (first Shine, no help) — shown on the Nights
+screen, so a solved night still has something to come back for. Each solve
+also adds that night's constellation to the **star map**: the route the light
+took, from the moon through every piece and goal, gathered into one sky by
+world.
+
 ### Leaderboards
 
 Three boards: **today's daily**, **each campaign night**, and the **Moon ladder**
@@ -418,10 +427,13 @@ src/
     moon.ts          the moon at any phase — only what is lit
     themes.ts        each world's sky, planet and constellations
     elements.ts      asteroids, satellites, shooting stars, warps, the Milky Way
+    starmap.ts       every solved night's constellation in one sky
   game/            the bridge between engine and DOM
     score.ts         points
     sandbox.ts       the Galaxy
     daily.ts         the daily puzzle, streaks, the share card
+    stardust.ts      earning, and the boosters
+    medals.ts        the three medals; constellations for the star map
   net/leaderboard.ts  opt-in player, submitting solves, an offline queue
   audio.ts         synthesised sound effects
   music.ts         the worlds' songs
