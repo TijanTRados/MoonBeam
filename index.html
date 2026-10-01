@@ -30,9 +30,14 @@
       <button class="btn btn-primary" data-action="play">Continue</button>
       <button class="btn" data-action="nights">Nights</button>
       <button class="btn" data-action="endless">Endless</button>
+      <button class="btn btn-galaxy" data-action="galaxy">Galaxy <small>every element</small></button>
       <button class="btn btn-quiet" data-action="howto">How to play</button>
     </nav>
     <p class="credit">A 2015 thesis project, rebuilt.<br />Tijan Tomislav Radoš</p>
+    <div class="title-toggles">
+      <button class="icon-btn" data-action="music" aria-label="Turn music off">🎵</button>
+      <button class="icon-btn" data-action="mute" aria-label="Turn sounds off">🔊</button>
+    </div>
   </section>
 
   <!-- ---------------------------------------------------------- nights -->
@@ -40,7 +45,10 @@
     <header class="bar">
       <button class="icon-btn" data-action="home" aria-label="Back">‹</button>
       <h2>Nights</h2>
-      <span class="bar-spacer"></span>
+      <label class="open-all">
+        <input type="checkbox" id="open-all" data-action="open-all" />
+        <span>Open all</span>
+      </label>
     </header>
     <div id="night-grid" class="night-grid"></div>
   </section>
@@ -53,15 +61,21 @@
         <h2 id="level-name">Night 1</h2>
         <div id="level-meta" class="meta"></div>
       </div>
-      <button class="icon-btn" data-action="mute" aria-label="Mute">🔊</button>
+      <button class="icon-btn" data-action="music" aria-label="Turn music off">🎵</button>
+      <button class="icon-btn" data-action="mute" aria-label="Turn sounds off">🔊</button>
       <button class="icon-btn" data-action="hint" aria-label="Hint">?</button>
     </header>
 
     <div class="board-wrap">
       <canvas id="board" aria-label="Puzzle grid"></canvas>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <div id="score" class="score-pill" aria-live="off" hidden></div>
     </div>
 
+    <div id="tray-caption" class="tray-caption" hidden>
+      <span id="tray-caption-text"></span>
+      <button class="caption-info" data-action="piece-info" aria-label="More about this piece">i</button>
+    </div>
     <div id="tray" class="tray" role="toolbar" aria-label="Pieces"></div>
 
     <div class="controls">
@@ -76,9 +90,38 @@
       <div class="win-stars" id="win-stars"></div>
       <h3 id="win-title">Solved</h3>
       <p id="win-sub" class="muted"></p>
+      <div id="win-badges" class="win-badges"></div>
+      <div id="win-points" class="win-points"></div>
       <div class="card-actions">
         <button class="btn btn-ghost" data-action="replay">Again</button>
         <button class="btn btn-primary" data-action="next">Next night</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- piece card -->
+  <div id="piece-card" class="overlay" hidden>
+    <div class="card card-piece">
+      <div id="piece-tag" class="piece-tag">New</div>
+      <canvas id="piece-demo" class="piece-demo" aria-hidden="true"></canvas>
+      <h3 id="piece-name"></h3>
+      <p id="piece-detail" class="muted"></p>
+      <div class="card-actions">
+        <button class="btn btn-primary" data-action="piece-ok">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- new world -->
+  <div id="world-card" class="overlay" hidden>
+    <div class="card card-world">
+      <div id="world-tag" class="piece-tag">New world</div>
+      <div id="world-planet" class="world-planet" aria-hidden="true"></div>
+      <h3 id="world-name"></h3>
+      <p id="world-blurb" class="muted"></p>
+      <p id="world-new" class="world-new"></p>
+      <div class="card-actions">
+        <button class="btn btn-primary" data-action="world-ok">Let's go</button>
       </div>
     </div>
   </div>
@@ -95,8 +138,8 @@
       <p class="muted small">
         Tap a piece in the tray, then tap a cell to place it. Tap a mirror you
         placed to flip it, and again to take it back. Tap anything else you
-        placed to pick it up.
-        Rings must be hit by <em>exactly</em> their colour — no more, no less.
+        placed to pick it up. Tap any piece that came with the level to find
+        out what it does — or tap one here for a demonstration.
       </p>
       <div class="card-actions">
         <button class="btn btn-primary" data-action="close-howto">Got it</button>
