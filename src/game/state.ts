@@ -5,7 +5,7 @@
  * tray, the board's clock, and how far the run animation has got. Knows nothing
  * about canvas or elements.
  */
-import { Level, Light, Tile, TileKind } from "../engine/types";
+import { Level, Light, Tile, TileKind, tileFrom } from "../engine/types";
 import {
   HOPS_PER_TICK, Outcome, SimResult, cycleLength, simulate, wins,
 } from "../engine/simulate";
@@ -70,9 +70,16 @@ export class Game {
   reveal = 0;
   starsLit = new Set<number>();
   outcome: Outcome | null = null;
+  /** Cells a hint has pointed at. */
   hint = new Set<number>();
+  /** …and, after a second hint on the same cell, exactly what goes there. */
+  hintGhost = new Map<number, Tile>();
+  /** Hints taken on this level. Any at all makes a solve "assisted". */
+  hintsUsed = 0;
   /** Times Shine has been pressed on this level. One means solved first try. */
   runs = 0;
+  /** Shines on this level that did not solve it. */
+  misses = 0;
   /** Points scored so far by the run being revealed. */
   runScore = 0;
 
@@ -134,6 +141,11 @@ export class Game {
     }
     this.selected = 0;
     this.runs = 0;
+    this.misses = 0;
+    this.hintsUsed = 0;
+    // Hints belong to the level, not to the board: Clear keeps them.
+    this.hint.clear();
+    this.hintGhost.clear();
     this.reset();
   }
 
@@ -146,7 +158,6 @@ export class Game {
     this.runScore = 0;
     this.starsLit.clear();
     this.outcome = null;
-    this.hint.clear();
   }
 
   get moving(): boolean {
@@ -243,7 +254,6 @@ export class Game {
     this.outcome = null;
     this.runScore = 0;
     this.starsLit.clear();
-    this.hint.clear();
   }
 
   /** The level as the engine sees it right now. */
@@ -263,7 +273,6 @@ export class Game {
     this.front = 0;
     this.runScore = 0;
     this.starsLit.clear();
-    this.hint.clear();
 
     const lv = this.current();
     this.fireAt = this.fireTick;
@@ -477,6 +486,7 @@ export class Game {
       // Board time carries on from wherever the light left it.
       this.clock = this.fireAt + this.front / HOPS_PER_TICK;
       this.phase = this.outcome?.won ? "won" : "lost";
+      if (!this.outcome?.won) this.misses++;
       out.settled = true;
     }
     return out;
@@ -489,35 +499,65 @@ export class Game {
     return pts.sort((a, b) => (this.eventOrder(a) ?? 0) - (this.eventOrder(b) ?? 0));
   }
 
-  /** Reveal one piece of the known solution that is not already correct. */
-  takeHint(): boolean {
+  /** Is the piece the known solution wants at this placement already there, exactly? */
+  private isRight(p: { i: number; kind: TileKind; mask?: Light; from?: Light }): boolean {
+    const cur = this.board[p.i];
+    return cur.kind === p.kind && cur.mask === p.mask && cur.from === p.from;
+  }
+
+  /**
+   * A hint, in two steps per piece, following the light from the moon.
+   *
+   * The first hint on a piece says *where*: its cell pulses. Asking again says
+   * *what*: a faint ghost of exactly the right piece, the right way round,
+   * appears in it. Pieces already right are skipped, so hints always point at
+   * the next thing that is actually wrong.
+   */
+  takeHint(): "where" | "what" | "none" {
     const sol = this.level.solution;
-    if (!sol?.length) return false;
-    for (const p of sol) {
-      const cur = this.board[p.i];
-      const ok = cur.kind === p.kind || (isMirror(cur.kind) && isMirror(p.kind));
-      if (!ok) { this.hint.add(p.i); return true; }
+    if (!sol?.length) return "none";
+    const next = sol.find((p) => !this.isRight(p));
+    if (!next) return "none";
+    this.hintsUsed++;
+    if (!this.hint.has(next.i)) { this.hint.add(next.i); return "where"; }
+    this.hintGhost.set(next.i, tileFrom(next));
+    return "what";
+  }
+
+  /** Hinted cells that still need something done to them. */
+  get openHints(): Set<number> {
+    const sol = this.level.solution ?? [];
+    const out = new Set<number>();
+    for (const i of this.hint) {
+      const p = sol.find((q) => q.i === i);
+      if (p && !this.isRight(p)) out.add(i);
     }
-    // Everything is in the right place already — nudge the orientations.
-    for (const p of sol) if (this.board[p.i].kind !== p.kind) { this.hint.add(p.i); return true; }
-    return false;
+    return out;
+  }
+
+  /** Ghosts still worth showing: only on cells not yet holding the right piece. */
+  get openGhosts(): Map<number, Tile> {
+    const out = new Map<number, Tile>();
+    const open = this.openHints;
+    for (const [i, t] of this.hintGhost) if (open.has(i)) out.set(i, t);
+    return out;
   }
 
   /** The result of the finished run, for the card. */
-  score(): { solved: boolean; stars: number; totalStars: number; par: number; used: number; firstTry: boolean; points: number } {
+  score(): { solved: boolean; stars: number; totalStars: number; par: number; used: number; firstTry: boolean; points: number; assisted: boolean } {
     return {
       solved: this.phase === "won",
       stars: this.outcome?.starsLit.size ?? 0,
       totalStars: this.outcome?.totalStars ?? 0,
       par: this.level.par ?? 0,
       used: this.used,
-      firstTry: this.runs === 1,
+      firstTry: this.runs === 1 && this.hintsUsed === 0,
       points: this.runScore,
+      assisted: this.hintsUsed > 0,
     };
   }
 }
 
-const isMirror = (k: TileKind) => k === "mirrorA" || k === "mirrorB";
 
 // ---------------------------------------------------------------- progress
 
@@ -540,11 +580,13 @@ export interface Progress {
   phasesSeen: string[];
   /** Every night open, whatever has been solved — for jumping around and testing. */
   openAll: boolean;
+  /** Nights skipped rather than solved; they can be come back to any time. */
+  skipped: number[];
 }
 
 export function loadProgress(): Progress {
   const fresh: Progress = {
-    unlocked: 1, stars: {}, best: {}, runSeed: 1, streak: 0, bestStreak: 0, seen: [], phasesSeen: [], openAll: false,
+    unlocked: 1, stars: {}, best: {}, runSeed: 1, streak: 0, bestStreak: 0, seen: [], phasesSeen: [], openAll: false, skipped: [],
   };
   try {
     const raw = localStorage.getItem(KEY);

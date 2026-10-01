@@ -128,7 +128,8 @@ function frame(nowMs: number) {
       hover,
       time: t,
       winGlow,
-      hint: game.hint,
+      hint: game.openHints,
+      hintGhost: game.openGhosts,
       particles: boardFx,
       dt,
       flare,
@@ -341,6 +342,12 @@ function sparkle(i: number, n: number, color: string) {
   }
 }
 
+/** After enough misses on a campaign night, offer a way past it. */
+function renderSkip() {
+  const b = $("[data-action=skip]");
+  b.hidden = !game || sandbox || endless || game.misses < 5 || game.phase === "won";
+}
+
 /** The points counter over the board. */
 function renderScore() {
   const el = $("#score");
@@ -448,6 +455,7 @@ function onSettled() {
       progress.unlocked = Math.max(progress.unlocked, night + 1);
       newBest = total > (progress.best[night] ?? -Infinity);
       if (newBest) progress.best[night] = total;
+      progress.skipped = progress.skipped.filter((n) => n !== night);
     }
     progress.streak = firstTry ? progress.streak + 1 : 0;
     progress.bestStreak = Math.max(progress.bestStreak, progress.streak);
@@ -475,7 +483,13 @@ function onSettled() {
             : "Not quite.";
     // With things moving, the same board may win at a different moment.
     if (game.moving && evaluate(game.current()).won) msg += " The pieces are right — try another moment!";
+    // Stuck? Offer a hint after a few misses, and a way past after a few more.
+    else if (game.misses === 3 && !sandbox) {
+      msg += " Stuck? Tap ? for a hint.";
+      $("[data-action=hint]").classList.add("nudge");
+    }
     toast(msg, 3200);
+    renderSkip();
   }
 }
 
@@ -769,6 +783,8 @@ function startLevel(n: number, isEndless = false) {
     if (currentScreen !== "game" || night !== n) return;
 
     game = new Game(gen.level);
+    $("[data-action=hint]").classList.remove("nudge");
+    renderSkip();
     winGlow = 0;
     flare = 0;
     climaxed = false;
@@ -793,6 +809,7 @@ function startSandbox() {
   toolSel = 0;
   setWorld("neptune", 1);
   game = new Game(sandboxLevel());
+  renderSkip();
   winGlow = 0; flare = 0; climaxed = false;
   clearFx(); boardFx.clear();
   $("#win").hidden = true;
@@ -885,6 +902,7 @@ function showWin(s: ReturnType<Game["score"]>, points: number, newBest: boolean)
 
   const badges: string[] = [];
   if (s.firstTry) badges.push("✨ First try");
+  if (s.assisted) badges.push("🔭 With a hint");
   if (s.par && s.used < s.par) badges.push("🌙 Fewer than we found!");
   else if (s.par && s.used === s.par) badges.push("🌙 Fewest possible");
   if (progress.streak >= 2) badges.push(`💫 ${progress.streak} in a row`);
@@ -967,7 +985,9 @@ function renderNights() {
       btn.appendChild(label);
       const meta = document.createElement("span");
       meta.className = "stars";
-      meta.textContent = best !== undefined ? `${"★".repeat(stars)} ${best}` : "★".repeat(stars);
+      meta.textContent = best !== undefined ? `${"★".repeat(stars)} ${best}`
+        : progress.skipped.includes(n) ? "skipped" : "★".repeat(stars);
+      if (progress.skipped.includes(n)) btn.classList.add("skipped");
       btn.appendChild(meta);
       if (!locked) btn.addEventListener("click", () => startLevel(n));
       row.appendChild(btn);
@@ -1083,10 +1103,23 @@ document.addEventListener("click", (e) => {
       game?.reset(); clearFx(); boardFx.clear(); renderTray(); sfxRemove();
       break;
     case "hint": {
-      if (!game) return;
-      const ok = game.takeHint();
-      toast(ok ? "A piece belongs here." : "Nothing more to hint.", 2200);
-      if (ok) sfxHint();
+      if (!game || game.phase === "running") return;
+      $("[data-action=hint]").classList.remove("nudge");
+      const h = game.takeHint();
+      toast(h === "where" ? "A piece belongs here. Ask again to see which."
+        : h === "what" ? "That piece, that way round."
+        : sandbox ? "No hints in the Galaxy — anything goes." : "Everything placed is right — try Shine!", 2600);
+      if (h !== "none") sfxHint();
+      break;
+    }
+    case "skip": {
+      if (!game || sandbox || endless) return;
+      if (!progress.skipped.includes(night)) progress.skipped.push(night);
+      progress.unlocked = Math.max(progress.unlocked, night + 1);
+      progress.streak = 0;
+      saveProgress(progress);
+      toast(`Night ${night} skipped — it'll wait for you on the Nights screen.`, 2600);
+      startLevel(night + 1);
       break;
     }
     case "piece-info": {

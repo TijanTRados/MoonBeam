@@ -567,3 +567,20 @@ body { -webkit-user-select: none; user-select: none; touch-action: manipulation;
 }
 .tray.is-sandbox .slot { flex: none; width: 50px; height: 50px; }
 .tray.is-sandbox .slot canvas { width: 38px; height: 38px; }
+
+/* ------------------------------------------------------------- help */
+
+/* The hint button glows after a few misses, until it is used. */
+.icon-btn.nudge {
+  color: #1a1030;
+  background: var(--accent-warm);
+  animation: nudge 1.6s ease-in-out infinite;
+}
+@keyframes nudge {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 208, 125, 0.6); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 208, 125, 0); }
+}
+.controls .btn-skip { flex: 0.8; }
+.btn-skip[hidden] { display: none; }
+.night.skipped { border-style: dashed; }
+.night.skipped .stars { color: var(--ink-dim); }

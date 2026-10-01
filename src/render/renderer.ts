@@ -36,6 +36,8 @@ export interface ViewState {
   winGlow: number;
   /** Cells to pulse as a hint, or empty. */
   hint: Set<number>;
+  /** Hinted cells showing a faint ghost of the piece that belongs there. */
+  hintGhost?: Map<number, Tile>;
 
   /** Particle system for this canvas; glitter is only emitted when present. */
   particles?: Particles;
@@ -153,6 +155,14 @@ export function draw(
     const t = tiles[i];
     if (t.kind === "empty" || (t.track && t.track.length > 1)) continue;
     drawTile(ctx, L, i, t, v, front, arrival, theme, comets);
+  }
+  // A second hint on a cell shows a ghost of exactly what belongs there.
+  for (const [i, t] of v.hintGhost ?? []) {
+    if (tiles[i]?.kind !== "empty") continue;
+    ctx.save();
+    ctx.globalAlpha = 0.32 + 0.14 * Math.sin(v.time * 3);
+    drawTile(ctx, L, i, t, { ...v, sim: null }, front, arrival, theme, comets);
+    ctx.restore();
   }
   // Moving pieces are drawn where they are *between* cells, so they glide.
   for (let i = 0; i < tiles.length; i++) {
