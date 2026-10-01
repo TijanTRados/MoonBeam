@@ -31,6 +31,7 @@
       <button class="btn btn-daily" data-action="daily">Daily puzzle <small id="daily-sub"></small></button>
       <button class="btn" data-action="nights">Nights</button>
       <button class="btn" data-action="endless">Endless</button>
+      <button class="btn" data-action="ranks">Leaderboards</button>
       <button class="btn btn-galaxy" data-action="galaxy">Galaxy <small>every element</small></button>
       <button class="btn btn-quiet" data-action="howto">How to play</button>
     </nav>
@@ -52,6 +53,31 @@
       </label>
     </header>
     <div id="night-grid" class="night-grid"></div>
+  </section>
+
+  <!-- ---------------------------------------------------------- leaderboards -->
+  <section id="screen-ranks" class="screen">
+    <header class="bar">
+      <button class="icon-btn" data-action="home" aria-label="Back">‹</button>
+      <h2>Leaderboards</h2>
+      <span class="bar-spacer"></span>
+    </header>
+    <div class="ranks">
+      <div class="tabs" role="tablist">
+        <button class="tab" data-action="ranks-tab" data-tab="daily">Today</button>
+        <button class="tab" data-action="ranks-tab" data-tab="night">Nights</button>
+        <button class="tab" data-action="ranks-tab" data-tab="ladder">Moon ladder</button>
+      </div>
+      <div id="ranks-nightnav" class="nightnav" hidden>
+        <button class="icon-btn" data-action="ranks-step" data-step="-1" aria-label="Previous night">‹</button>
+        <span id="ranks-night">Night 1</span>
+        <button class="icon-btn" data-action="ranks-step" data-step="1" aria-label="Next night">›</button>
+      </div>
+      <p class="muted small center ranks-how">Fewest pieces first, then points, then time. ✓ marks the fewest possible.<br />Points here leave out the first-try bonus, which can't be checked.</p>
+      <ol id="ranks-list" class="ranks-list"></ol>
+      <p id="ranks-you" class="ranks-you"></p>
+      <p id="ranks-me" class="muted small center"></p>
+    </div>
   </section>
 
   <!-- ---------------------------------------------------------- game -->
@@ -94,6 +120,7 @@
       <p id="win-sub" class="muted"></p>
       <div id="win-badges" class="win-badges"></div>
       <div id="win-points" class="win-points"></div>
+      <p id="win-rank" class="win-rank" hidden></p>
       <div class="card-actions">
         <button class="btn btn-ghost" data-action="replay">Again</button>
         <button class="btn btn-ghost" data-action="share" hidden>Share</button>
@@ -125,6 +152,23 @@
       <p id="world-new" class="world-new"></p>
       <div class="card-actions">
         <button class="btn btn-primary" data-action="world-ok">Let's go</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- join -->
+  <div id="join-card" class="overlay" hidden>
+    <div class="card">
+      <h3>Join the leaderboards?</h3>
+      <p class="muted">
+        Pick a nickname. Only that name and your scores are kept — no email,
+        no account. You can rename or leave any time.
+      </p>
+      <input id="join-name" class="text-input" maxlength="16" autocomplete="nickname" placeholder="Nickname" />
+      <p id="join-error" class="join-error"></p>
+      <div class="card-actions">
+        <button class="btn btn-ghost" data-action="join-no">Not now</button>
+        <button class="btn btn-primary" data-action="join-yes">Join</button>
       </div>
     </div>
   </div>

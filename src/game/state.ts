@@ -366,6 +366,11 @@ export class Game {
     return this.outcome;
   }
 
+  /** The tick of board time the last run was fired at. */
+  get firedAt(): number {
+    return this.fireAt;
+  }
+
   /** How far the light has travelled, in hops from the moon. */
   get frontHops(): number {
     return this.front;

@@ -214,6 +214,39 @@ the moon waxes through the week to match. Solving it moves a day streak on; the
 share card shows one moon per Shine — dark for a miss, full for the solve — with
 points, pieces and time, and never the board.
 
+### Leaderboards
+
+Three boards: **today's daily**, **each campaign night**, and the **Moon ladder**
+(best points summed over every night). They rank by fewest pieces, then points,
+then time — the puzzle's own skill first, style second, speed only to break
+ties. Solves with a hint aren't ranked.
+
+**Nothing a client says about its score is trusted.** The engine is
+deterministic and every puzzle is a pure function of its number, so the game
+sends only *what it placed and when it pressed Shine*. The server
+(`server/`, Node's own `http`, no framework, no database) regenerates the same
+puzzle, checks the placements against the tray and the board, replays the shot
+with the same simulator, and scores it itself. A fingerprint of the board
+catches a client whose generator has drifted.
+
+Joining is opt-in, with a nickname. The server keeps a random player id, that
+nickname, and each player's best result per board — no email, no account, no
+IP addresses (those are used for rate limiting in memory only). Players can
+rename or leave, which deletes their scores.
+
+Running it:
+
+```bash
+npm run server                 # http://localhost:8787, scores in server/data/
+```
+
+In dev the game finds it on port 8787 of whatever host served the page. To put
+it online, run the same command on any Node 22 host (Render, Fly.io, Railway, a
+small VPS) with `ALLOWED_ORIGINS=https://tijantrados.github.io` and
+`DATA_FILE` on persistent storage, then set the repository variable
+`LEADERBOARD_URL` to its address — the Pages build picks it up. Unset, the game
+simply says leaderboards are off.
+
 ## The physics
 
 Four directions, and light is an RGB bitmask (white = R|G|B).
@@ -374,9 +407,12 @@ src/
   game/            the bridge between engine and DOM
     score.ts         points
     sandbox.ts       the Galaxy
+    daily.ts         the daily puzzle, streaks, the share card
+  net/leaderboard.ts  opt-in player, submitting solves, an offline queue
   audio.ts         synthesised sound effects
   music.ts         the worlds' songs
   main.ts          screens, input, render loop
+server/            the leaderboard: verify by replay, rank, store
 test/
 tools/
 ```

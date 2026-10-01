@@ -14,9 +14,13 @@ import { INFO, PieceKey, demoLevel, describe, infoKey, kindsIn } from "./game/in
 import { bonuses } from "./game/score";
 import { TOOLS, TOOL_TIPS, sandboxLevel, sandboxTap } from "./game/sandbox";
 import {
-  DailyResult, WEEKDAY_NAMES, dailyMoon, dailyWorld, formatTime, generateDaily, liveStreak,
+  DailyResult, WEEKDAY_NAMES, dailyMoon, dailyWorld, formatTime, generateDaily, levelHash, liveStreak,
   nextStreak, shareText, todayNumber, weekday,
 } from "./game/daily";
+import {
+  BoardKind, SubmitBody, fetchBoard, fetchLadder, flushPending, forgetMe, leaderboardsEnabled,
+  placementsOf, player, rename, setPlayer, submit, validName,
+} from "./net/leaderboard";
 import { cellAt, computeLayout, draw, drawIcon, frontOf } from "./render/renderer";
 import { PathSeg, clearFx, spawnFx, spawnFxAt } from "./render/fx";
 import { Particles, rand } from "./render/particles";
@@ -57,7 +61,7 @@ const now = () => performance.now() / 1000;
 
 // ---------------------------------------------------------------- screens
 
-type ScreenName = "title" | "nights" | "game";
+type ScreenName = "title" | "nights" | "game" | "ranks";
 let currentScreen: ScreenName = "title";
 
 function show(name: ScreenName) {
@@ -66,6 +70,7 @@ function show(name: ScreenName) {
   $$(".screen").forEach((s) => s.classList.remove("is-active"));
   $(`#screen-${name}`).classList.add("is-active");
   if (name === "nights") renderNights();
+  if (name === "ranks") void renderRanks();
   if (name === "title") refreshContinue();
 }
 
@@ -362,6 +367,146 @@ function sparkle(i: number, n: number, color: string) {
   }
 }
 
+// ---------------------------------------------------------------- leaderboards
+
+/** The solve waiting to be sent, if the player has not decided about joining yet. */
+let unsent: SubmitBody | null = null;
+
+/** Which board a solve belongs on: today's daily or a campaign night. Endless and the Galaxy have none. */
+function boardOf(): { kind: BoardKind; id: number } | null {
+  if (dailyN) return { kind: "daily", id: dailyN };
+  if (!endless && !sandbox && night > 0) return { kind: "night", id: night };
+  return null;
+}
+
+function winRank(html: string) {
+  const el = $("#win-rank");
+  el.innerHTML = html;
+  el.hidden = !html;
+}
+
+/**
+ * After a win: send what was placed and when — never a score; the server
+ * replays the shot and scores it itself — and say where it ranks.
+ */
+async function sendScore(assisted: boolean) {
+  winRank("");
+  unsent = null;
+  const where = boardOf();
+  if (!game || !where || !leaderboardsEnabled()) return;
+  if (assisted) { winRank("Solved with a hint — hint-free solves go on the leaderboard."); return; }
+  const body: SubmitBody = {
+    ...where,
+    placements: placementsOf(game.board),
+    fireTick: game.firedAt,
+    seconds: dailyN ? Math.round(dailySeconds) : undefined,
+    hash: levelHash(game.level),
+  };
+  const me = player();
+  if (me.optIn === null || (me.optIn && !me.name)) {
+    unsent = body;
+    winRank(`<button class="link" data-action="join-open">Join the leaderboard</button> to see where this ranks.`);
+    return;
+  }
+  if (!me.optIn) return;
+  await sendBody(body);
+}
+
+async function sendBody(body: SubmitBody) {
+  const label = body.kind === "daily" ? "today's daily" : `Night ${body.id}`;
+  winRank("Sending to the leaderboard…");
+  try {
+    const r = await submit(body);
+    if (!r) { winRank(""); return; }
+    winRank(`<button class="link" data-action="ranks-from-win">🏆 #${r.rank} of ${r.total} on ${label}</button>` +
+      (r.improved ? "" : " · your best stands"));
+  } catch (e) {
+    const status = (e as { status?: number }).status;
+    winRank(status === undefined ? "Couldn't reach the leaderboard — it'll be sent next time."
+      : `Not ranked: ${(e as Error).message}.`);
+  }
+}
+
+let ranksTab: "daily" | "night" | "ladder" = "daily";
+let ranksNight = 1;
+
+/** The leaderboards screen: today's daily, one night at a time, and the ladder. */
+async function renderRanks() {
+  for (const b of $$("[data-action=ranks-tab]")) b.classList.toggle("on", b.dataset.tab === ranksTab);
+  $("#ranks-nightnav").hidden = ranksTab !== "night";
+  $("#ranks-night").textContent = `Night ${ranksNight}`;
+  renderMe();
+  const list = $("#ranks-list");
+  const you = $("#ranks-you");
+  you.textContent = "";
+  if (!leaderboardsEnabled()) {
+    list.innerHTML = `<p class="muted center">Leaderboards aren't connected in this build of the game.</p>`;
+    return;
+  }
+  list.innerHTML = `<p class="muted center">Looking up…</p>`;
+  const tab = ranksTab, n = ranksNight;
+  try {
+    if (tab === "ladder") {
+      const v = await fetchLadder();
+      if (tab !== ranksTab) return;
+      list.innerHTML = v.rows.length ? v.rows.map((r) =>
+        `<li class="${r.you ? "you" : ""}"><span class="rk">${r.rank}</span><span class="nm">${esc(r.name)}</span>` +
+        `<span class="dim">${r.nights} night${r.nights === 1 ? "" : "s"}</span><b>${r.points}</b></li>`).join("")
+        : `<p class="muted center">Nobody yet. Solve a night to be first.</p>`;
+      if (v.you && !v.rows.some((r) => r.you)) you.textContent = `You: #${v.you.rank} of ${v.total} · ${v.you.points}`;
+    } else {
+      const id = tab === "daily" ? todayNumber() : n;
+      const v = await fetchBoard(tab, id);
+      if (tab !== ranksTab || n !== ranksNight) return;
+      list.innerHTML = v.rows.length ? v.rows.map((r) =>
+        `<li class="${r.you ? "you" : ""}"><span class="rk">${r.rank}</span><span class="nm">${esc(r.name)}</span>` +
+        `<span class="dim">${r.used} pc${r.used === 1 ? "" : "s"}${r.used <= r.fewest ? " ✓" : ""}${tab === "daily" ? ` · ${formatTime(r.seconds)}` : ""}</span>` +
+        `<b>${r.points}</b></li>`).join("")
+        : `<p class="muted center">Nobody yet. ${tab === "daily" ? "Today's puzzle is waiting." : "Be the first."}</p>`;
+      if (v.you && !v.rows.some((r) => r.you)) you.textContent = `You: #${v.you.rank} of ${v.total}`;
+    }
+  } catch {
+    list.innerHTML = `<p class="muted center">Can't reach the leaderboard right now.</p>`;
+  }
+}
+
+function renderMe() {
+  const me = player();
+  $("#ranks-me").innerHTML = me.optIn && me.name
+    ? `Playing as <b>${esc(me.name)}</b> · <button class="link" data-action="join-open">rename</button> · ` +
+      `<button class="link" data-action="forget">leave</button>`
+    : `<button class="link" data-action="join-open">Join with a nickname</button> to appear here.`;
+}
+
+function esc(s: string) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
+function openJoin() {
+  ($("#join-name") as HTMLInputElement).value = player().name;
+  $("#join-error").textContent = "";
+  $("#join-card").hidden = false;
+  window.setTimeout(() => ($("#join-name") as HTMLInputElement).focus(), 50);
+}
+
+async function joinYes() {
+  const name = validName(($("#join-name") as HTMLInputElement).value);
+  if (!name) { $("#join-error").textContent = "2–16 letters, numbers, spaces or _ . ' -"; return; }
+  const was = player();
+  $("#join-card").hidden = true;
+  if (was.optIn && was.name) {
+    try { await rename(name); } catch { toast("Couldn't rename right now.", 2000); }
+  } else {
+    setPlayer({ name, optIn: true });
+  }
+  sfxSelect();
+  if (unsent) { const b = unsent; unsent = null; await sendBody(b); }
+  void flushPending();
+  if (currentScreen === "ranks") void renderRanks();
+}
+
+let forgetArmed = 0;
+
 /** After enough misses on a campaign night, offer a way past it. */
 function renderSkip() {
   const b = $("[data-action=skip]");
@@ -490,6 +635,7 @@ function onSettled() {
     const pts = game.constellation();
     if (pts.length >= 2) spawnFx(pts[0], "constellation", now(), WHITE, { points: pts });
     window.setTimeout(() => showWin(s, total, newBest), 900);
+    void sendScore(s.assisted);
   } else {
     const o = game.outcome;
     const sim = game.sim;
@@ -1183,6 +1329,46 @@ document.addEventListener("click", (e) => {
     case "play": startLevel(progress.unlocked); break;
     case "nights": show("nights"); break;
     case "galaxy": startSandbox(); break;
+    case "ranks":
+      ranksTab = "daily";
+      ranksNight = Math.max(1, progress.unlocked - 1);
+      show("ranks");
+      break;
+    case "ranks-from-win":
+      $("#win").hidden = true;
+      ranksTab = dailyN ? "daily" : "night";
+      ranksNight = Math.max(1, night);
+      show("ranks");
+      break;
+    case "ranks-tab":
+      ranksTab = (el.dataset.tab as typeof ranksTab) ?? "daily";
+      sfxSelect();
+      void renderRanks();
+      break;
+    case "ranks-step":
+      ranksNight = Math.max(1, ranksNight + Number(el.dataset.step ?? 0));
+      void renderRanks();
+      break;
+    case "join-open": openJoin(); break;
+    case "join-no":
+      $("#join-card").hidden = true;
+      if (player().optIn === null) setPlayer({ optIn: false });
+      if (unsent) { unsent = null; winRank(""); }
+      break;
+    case "join-yes": void joinYes(); break;
+    case "forget": {
+      // Two taps: the first arms it, the second does it.
+      if (Date.now() - forgetArmed > 4000) {
+        forgetArmed = Date.now();
+        toast("Tap leave again to delete your scores from the leaderboard.", 3500);
+        break;
+      }
+      forgetArmed = 0;
+      forgetMe().then(() => toast("Done — your scores are gone.", 2200))
+        .catch(() => toast("Couldn't reach the leaderboard; try again later.", 2400))
+        .finally(() => void renderRanks());
+      break;
+    }
     case "daily": startDaily(); break;
     case "share": void shareDaily(); break;
     case "open-all":
@@ -1268,6 +1454,11 @@ document.addEventListener("click", (e) => {
 
 // Keyboard: space to run, R to reset, 1-9 to pick a tray slot.
 document.addEventListener("keydown", (e) => {
+  if (!$("#join-card").hidden) {
+    if (e.key === "Enter") { e.preventDefault(); void joinYes(); }
+    else if (e.key === "Escape") ($("[data-action=join-no]") as HTMLElement).click();
+    return;
+  }
   if (!game || currentScreen !== "game") return;
   if (!$("#world-card").hidden) {
     if (e.key === "Enter" || e.key === " " || e.key === "Escape") { e.preventDefault(); ($("[data-action=world-ok]") as HTMLElement).click(); }
@@ -1305,6 +1496,7 @@ function renderToggles() {
 
 renderToggles();
 show("title");
+void flushPending();
 requestAnimationFrame(frame);
 
 // Dev-only handle for poking at a level from the console: `mb.level()`,

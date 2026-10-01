@@ -10,3 +10,6 @@ ios/
 
 # Vite would try to serve the legacy Android project; it is here to be read.
 legacy-2015/app/build/
+
+# Leaderboard scores from a local server run
+server/data/
