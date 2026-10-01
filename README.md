@@ -205,6 +205,15 @@ Generating a night takes **3–190 ms**, so it happens on demand.
 
 ---
 
+### The daily puzzle
+
+Everyone gets the same board on the same day, and nothing is stored or served:
+the puzzle number is the date, and the date is the seed (`src/game/daily.ts`).
+Like a newspaper crossword it is gentle on Monday and hardest on Saturday, and
+the moon waxes through the week to match. Solving it moves a day streak on; the
+share card shows one moon per Shine — dark for a miss, full for the solve — with
+points, pieces and time, and never the board.
+
 ## The physics
 
 Four directions, and light is an RGB bitmask (white = R|G|B).

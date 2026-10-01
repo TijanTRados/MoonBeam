@@ -13,6 +13,10 @@ import { Game, loadProgress, saveProgress, Progress, RevealTick } from "./game/s
 import { INFO, PieceKey, demoLevel, describe, infoKey, kindsIn } from "./game/info";
 import { bonuses } from "./game/score";
 import { TOOLS, TOOL_TIPS, sandboxLevel, sandboxTap } from "./game/sandbox";
+import {
+  DailyResult, WEEKDAY_NAMES, dailyMoon, dailyWorld, formatTime, generateDaily, liveStreak,
+  nextStreak, shareText, todayNumber, weekday,
+} from "./game/daily";
 import { cellAt, computeLayout, draw, drawIcon, frontOf } from "./render/renderer";
 import { PathSeg, clearFx, spawnFx, spawnFxAt } from "./render/fx";
 import { Particles, rand } from "./render/particles";
@@ -39,6 +43,10 @@ let endless = false;
 let endlessSeed = Date.now() >>> 0;
 /** In the Galaxy: everything placeable, nothing recorded. */
 let sandbox = false;
+/** Playing a daily puzzle: its number, or 0. */
+let dailyN = 0;
+/** Seconds spent on the daily so far — only while it is on screen. */
+let dailySeconds = 0;
 let toolSel = 0;
 
 /** The current world's look, and how full its moon is tonight. */
@@ -65,6 +73,13 @@ function show(name: ScreenName) {
 function refreshContinue() {
   ($("[data-action=play]") as HTMLElement).textContent =
     progress.unlocked > 1 ? `Continue · Night ${progress.unlocked}` : "Play";
+  const today = todayNumber();
+  const done = progress.daily[today];
+  const streak = liveStreak(progress.dailyStreak, progress.lastDaily, today);
+  $("#daily-sub").textContent = done
+    ? `✓ solved${streak >= 2 ? ` · 🔥 ${streak}` : ""}`
+    : `#${today} · ${WEEKDAY_NAMES[weekday(today)]}${streak >= 1 ? ` · 🔥 ${streak}` : ""}`;
+  $("[data-action=daily]").classList.toggle("done", !!done);
 }
 
 // ---------------------------------------------------------------- canvases
@@ -100,6 +115,11 @@ function frame(nowMs: number) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     game.tickClock(dt);
+    if (dailyN && game.phase !== "won" && $("#piece-card").hidden) {
+      const before = Math.floor(dailySeconds);
+      dailySeconds += dt;
+      if (Math.floor(dailySeconds) !== before) renderDailyClock();
+    }
     if (game.phase === "running") handleReveal(game.advance(dt), t);
     for (const [k, v] of gateFlash) {
       if (v <= dt * 2.5) gateFlash.delete(k); else gateFlash.set(k, v - dt * 2.5);
@@ -345,7 +365,7 @@ function sparkle(i: number, n: number, color: string) {
 /** After enough misses on a campaign night, offer a way past it. */
 function renderSkip() {
   const b = $("[data-action=skip]");
-  b.hidden = !game || sandbox || endless || game.misses < 5 || game.phase === "won";
+  b.hidden = !game || sandbox || endless || !!dailyN || game.misses < 5 || game.phase === "won";
 }
 
 /** The points counter over the board. */
@@ -450,7 +470,11 @@ function onSettled() {
     const firstTry = s.firstTry;
     const total = s.points + bonuses(s.used, s.par, s.firstTry).reduce((n, b) => n + b.points, 0);
     let newBest = false;
-    if (!endless) {
+    if (dailyN) {
+      newBest = !progress.daily[dailyN];
+      recordDaily(s, total);
+      renderDailyClock();
+    } else if (!endless) {
       progress.stars[night] = Math.max(progress.stars[night] ?? 0, earned);
       progress.unlocked = Math.max(progress.unlocked, night + 1);
       newBest = total > (progress.best[night] ?? -Infinity);
@@ -757,6 +781,7 @@ function setWorld(key: PhaseKey, lit: number) {
 function startLevel(n: number, isEndless = false) {
   endless = isEndless;
   sandbox = false;
+  dailyN = 0;
   night = n;
   const { phase: world, index } = phaseFor(n);
   setWorld(world.key, moonForNight(index));
@@ -801,9 +826,90 @@ function startLevel(n: number, isEndless = false) {
   }, 16);
 }
 
+const dailyCache = new Map<number, Level>();
+
+/** Today's puzzle — the same board for everyone, from the date alone. */
+function startDaily() {
+  const n = todayNumber();
+  endless = false;
+  sandbox = false;
+  dailyN = n;
+  night = 0;
+  dailySeconds = 0;
+  setWorld(dailyWorld(n), dailyMoon(n));
+  $("#level-name").textContent = `Daily #${n}`;
+  $("#level-meta").innerHTML = "<span>composing…</span>";
+  $("#tray").innerHTML = "";
+  $("#tray-caption").hidden = true;
+  $("#win").hidden = true;
+  game = null;
+  show("game");
+
+  setTimeout(() => {
+    let level = dailyCache.get(n);
+    if (!level) { level = generateDaily(n).level; dailyCache.set(n, level); }
+    if (currentScreen !== "game" || dailyN !== n) return;
+    game = new Game(level);
+    $("[data-action=hint]").classList.remove("nudge");
+    renderSkip();
+    winGlow = 0; flare = 0; climaxed = false;
+    clearFx(); boardFx.clear();
+    musicBrightness(0.35, 0.8);
+    renderDailyClock();
+    renderTray();
+    const done = progress.daily[n];
+    toast(done ? "Already solved today — play it again for fun." : describeGoal(level), 2600);
+    introduceNewPieces(level);
+  }, 16);
+}
+
+/** The daily's header line: the day, the clock, and the fewest pieces. */
+function renderDailyClock() {
+  if (!dailyN) return;
+  const done = progress.daily[dailyN];
+  $("#level-meta").innerHTML =
+    `<span>${WEEKDAY_NAMES[weekday(dailyN)]}</span>` +
+    `<span class="clock">${done ? `✓ ${formatTime(done.seconds)}` : `⏱ ${formatTime(dailySeconds)}`}</span>` +
+    (game ? `<span>fewest ${game.level.par ?? "?"}</span>` : "");
+}
+
+/** Record the first solve of a daily, and move the streak on. */
+function recordDaily(s: ReturnType<Game["score"]>, total: number): DailyResult {
+  const existing = progress.daily[dailyN];
+  if (existing) return existing;
+  const r: DailyResult = {
+    points: total, used: s.used, fewest: s.par, seconds: Math.round(dailySeconds),
+    misses: game?.misses ?? 0, assisted: s.assisted,
+  };
+  progress.daily[dailyN] = r;
+  progress.dailyStreak = nextStreak(progress.dailyStreak, progress.lastDaily, dailyN);
+  progress.dailyBestStreak = Math.max(progress.dailyBestStreak, progress.dailyStreak);
+  progress.lastDaily = dailyN;
+  saveProgress(progress);
+  return r;
+}
+
+const SHARE_URL = "https://tijantrados.github.io/MoonBeam/";
+
+async function shareDaily() {
+  const r = progress.daily[dailyN];
+  if (!r) return;
+  const text = shareText(dailyN, r, progress.dailyStreak, SHARE_URL);
+  try {
+    if (navigator.share && matchMedia("(pointer: coarse)").matches) { await navigator.share({ text }); return; }
+  } catch { /* cancelled, or not allowed: fall back to the clipboard */ }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("Copied — paste it anywhere.", 2000);
+  } catch {
+    toast(text, 6000);
+  }
+}
+
 /** The Galaxy: every element, no rules, nothing recorded. */
 function startSandbox() {
   endless = false;
+  dailyN = 0;
   sandbox = true;
   night = 0;
   toolSel = 0;
@@ -926,7 +1032,16 @@ function showWin(s: ReturnType<Game["score"]>, points: number, newBest: boolean)
     else sfxPoints(true);
   };
   requestAnimationFrame(countUp);
-  ($("#win [data-action=next]") as HTMLElement).hidden = sandbox;
+  ($("#win [data-action=next]") as HTMLElement).hidden = sandbox || !!dailyN;
+  ($("#win [data-action=share]") as HTMLElement).hidden = !dailyN;
+  if (dailyN) {
+    const r = progress.daily[dailyN];
+    $("#win-title").innerHTML = `Daily <span class="num">#${dailyN}</span>`;
+    $("#win-sub").textContent = r
+      ? `Solved in ${formatTime(r.seconds)} · ${r.misses + 1} Shine${r.misses ? "s" : ""}` +
+        (progress.dailyStreak >= 2 ? ` · 🔥 ${progress.dailyStreak}-day streak` : "")
+      : "";
+  }
 
   $("#win").hidden = false;
 }
@@ -1068,6 +1183,8 @@ document.addEventListener("click", (e) => {
     case "play": startLevel(progress.unlocked); break;
     case "nights": show("nights"); break;
     case "galaxy": startSandbox(); break;
+    case "daily": startDaily(); break;
+    case "share": void shareDaily(); break;
     case "open-all":
       progress.openAll = ($("#open-all") as HTMLInputElement).checked;
       saveProgress(progress);
@@ -1113,7 +1230,7 @@ document.addEventListener("click", (e) => {
       break;
     }
     case "skip": {
-      if (!game || sandbox || endless) return;
+      if (!game || sandbox || endless || dailyN) return;
       if (!progress.skipped.includes(night)) progress.skipped.push(night);
       progress.unlocked = Math.max(progress.unlocked, night + 1);
       progress.streak = 0;
@@ -1199,6 +1316,7 @@ if (import.meta.env.DEV) {
     board: () => game?.board,
     go: (n: number, e = false) => startLevel(n, e),
     galaxy: () => startSandbox(),
+    daily: () => startDaily(),
     solveIt: () => {
       if (!game?.level.solution) return "no stored solution";
       for (const p of game.level.solution) {

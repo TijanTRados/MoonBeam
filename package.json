@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "tsx test/engine.test.ts && tsx test/reveal.test.ts && tsx test/elements.test.ts && tsx test/phases.test.ts && tsx test/sandbox.test.ts && tsx test/help.test.ts",
+    "test": "tsx test/engine.test.ts && tsx test/reveal.test.ts && tsx test/elements.test.ts && tsx test/phases.test.ts && tsx test/sandbox.test.ts && tsx test/help.test.ts && tsx test/daily.test.ts",
     "gen": "tsx tools/gen-report.ts",
     "android": "npm run build && npx cap sync android && npx cap open android"
   },

@@ -197,7 +197,7 @@ export function drawCometPiece(
   ctx.lineWidth = Math.max(0.8, s * 0.018);
   ctx.stroke(sp);
   ctx.fillStyle = alpha(ice, 0.8);
-  ctx.font = `700 ${Math.max(8, s * 0.17)}px "Pixelify Sans", monospace`;
+  ctx.font = `700 ${Math.max(8, s * 0.17)}px Nunito, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(String(seq + 1), s * 0.2, s * 0.2);

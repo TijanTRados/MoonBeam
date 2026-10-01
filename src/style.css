@@ -312,7 +312,7 @@ body { -webkit-user-select: none; user-select: none; touch-action: manipulation;
   color: #1a1030;
   font-size: 12px; font-weight: 700;
   display: grid; place-items: center;
-  font-family: "Pixelify Sans", monospace;
+  font-family: Nunito, sans-serif; font-weight: 800;
 }
 
 .controls {
@@ -367,7 +367,7 @@ body { -webkit-user-select: none; user-select: none; touch-action: manipulation;
   align-items: center; justify-content: center;
   gap: 2px;
   cursor: pointer;
-  font-family: "Pixelify Sans", monospace;
+  font-family: Nunito, sans-serif; font-weight: 700;
   font-size: 17px;
   padding: 0;
   min-width: 0;
@@ -523,7 +523,7 @@ body { -webkit-user-select: none; user-select: none; touch-action: manipulation;
   opacity: 0; transform: translateY(4px);
   animation: badge-in 0.35s ease forwards;
 }
-.pt-row b { color: #ffe066; font-family: "Pixelify Sans", monospace; }
+.pt-row b { color: #ffe066; font-family: Nunito, sans-serif; font-weight: 800; font-variant-numeric: tabular-nums; }
 .pt-row.neg b { color: #ff8a7a; }
 .pt-total { border-top: 1px solid var(--panel-edge); margin-top: 4px; padding-top: 8px; color: var(--ink); font-weight: 700; }
 .pt-total b { font-size: 20px; }
@@ -584,3 +584,17 @@ body { -webkit-user-select: none; user-select: none; touch-action: manipulation;
 .btn-skip[hidden] { display: none; }
 .night.skipped { border-style: dashed; }
 .night.skipped .stars { color: var(--ink-dim); }
+
+/* ------------------------------------------------------------- daily */
+
+.btn-daily {
+  background: linear-gradient(180deg, rgba(255, 208, 125, 0.22), rgba(255, 208, 125, 0.1));
+  border-color: rgba(255, 208, 125, 0.45);
+  color: var(--moon);
+}
+.btn-daily small { display: block; font-size: 11px; color: var(--ink-dim); font-weight: 600; margin-top: 2px; }
+.btn-daily.done { background: var(--panel); border-color: var(--panel-edge); color: var(--ink); }
+.meta .clock { font-variant-numeric: tabular-nums; color: var(--moon); }
+.card-actions .btn[hidden] { display: none; }
+/* The pixel face's 2 and 5 read as 8 and S at small sizes: numbers get the round face. */
+.card h3 .num { font-family: Nunito, sans-serif; font-weight: 800; }

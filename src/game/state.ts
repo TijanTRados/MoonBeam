@@ -11,6 +11,7 @@ import {
 } from "../engine/simulate";
 import { poolKey } from "../engine/solver";
 import { POINTS, segmentPoints } from "./score";
+import type { DailyResult } from "./daily";
 
 export type Phase = "build" | "running" | "won" | "lost";
 
@@ -582,11 +583,18 @@ export interface Progress {
   openAll: boolean;
   /** Nights skipped rather than solved; they can be come back to any time. */
   skipped: number[];
+  /** Daily puzzle number -> the first solve of it. */
+  daily: Record<number, DailyResult>;
+  dailyStreak: number;
+  dailyBestStreak: number;
+  /** The last daily puzzle solved. */
+  lastDaily: number;
 }
 
 export function loadProgress(): Progress {
   const fresh: Progress = {
     unlocked: 1, stars: {}, best: {}, runSeed: 1, streak: 0, bestStreak: 0, seen: [], phasesSeen: [], openAll: false, skipped: [],
+    daily: {}, dailyStreak: 0, dailyBestStreak: 0, lastDaily: 0,
   };
   try {
     const raw = localStorage.getItem(KEY);
