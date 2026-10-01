@@ -40,9 +40,9 @@ export type Feature = keyof Features;
  * towards the end of it.
  */
 export const SOFT_GATE: Record<Feature, number> = {
-  galaxy: 1.5, stars: 2, splitters: 2.5, crystals: 2.5, tints: 3, comets: 3,
-  portals: 3.5, blackholes: 4, warps: 4, terrain: 4, combinedRings: 4.5,
-  asteroids: 5, satellites: 5.5, movingWalls: 6,
+  galaxy: 1.5, stars: 1.8, splitters: 2.2, crystals: 2.2, tints: 2.6, comets: 2.8,
+  portals: 3, blackholes: 3.3, warps: 3.3, terrain: 3.3, combinedRings: 3.9,
+  asteroids: 3.8, satellites: 4.4, movingWalls: 4.6,
 };
 
 /** Without a phase (tests, tools), what a difficulty allows by itself. */
@@ -94,24 +94,33 @@ const MARS = plus(MERCURY, "terrain", "warps", "blackholes", "combinedRings");
 const JUPITER = plus(MARS, "asteroids");
 const SATURN = plus(JUPITER, "satellites", "movingWalls");
 
+/*
+ * The ramp, measured rather than guessed (`tools/ramp-report.ts`). What makes a
+ * night hard for a person is mostly how many pieces must be right at once, and
+ * whether colour is in play. A rating around 4 means three or four pieces with
+ * two colours of ring; the first version of this table reached that by night
+ * 16, in the same world that introduces colour, and playtesters stalled there.
+ * Now each world climbs about one point, the early worlds less, and the steep
+ * part of the curve is saved for the outer planets.
+ */
 export const PHASES: Phase[] = [
-  { key: "earth", name: "Earth", first: 1, last: 10, dMin: 1, dMax: 3.5, features: EARTH,
+  { key: "earth", name: "Earth", first: 1, last: 10, dMin: 1, dMax: 2.6, features: EARTH,
     introduces: [], blurb: "Home. The moon, a few mirrors, and the rings it wants lit." },
-  { key: "venus", name: "Venus", first: 11, last: 20, dMin: 2.5, dMax: 4.5, features: VENUS,
+  { key: "venus", name: "Venus", first: 11, last: 20, dMin: 2.2, dMax: 3.2, features: VENUS,
     introduces: ["crystals", "tints"], blurb: "Under the clouds, moonlight comes apart into colour." },
-  { key: "mercury", name: "Mercury", first: 21, last: 30, dMin: 3.5, dMax: 5.5, features: MERCURY,
+  { key: "mercury", name: "Mercury", first: 21, last: 30, dMin: 2.7, dMax: 3.7, features: MERCURY,
     introduces: ["comets", "portals"], blurb: "Close to the sun, shooting stars race and light leaps." },
-  { key: "mars", name: "Mars", first: 31, last: 40, dMin: 4.5, dMax: 6.5, features: MARS,
+  { key: "mars", name: "Mars", first: 31, last: 40, dMin: 3.2, dMax: 4.3, features: MARS,
     introduces: ["terrain", "warps", "blackholes"], blurb: "Rough red ground, and edges that fold round on themselves." },
-  { key: "jupiter", name: "Jupiter", first: 41, last: 50, dMin: 5, dMax: 7, features: JUPITER,
+  { key: "jupiter", name: "Jupiter", first: 41, last: 50, dMin: 3.7, dMax: 4.9, features: JUPITER,
     introduces: ["asteroids"], blurb: "The giant's asteroids drift through — now timing matters." },
-  { key: "saturn", name: "Saturn", first: 51, last: 60, dMin: 6, dMax: 8, features: SATURN,
+  { key: "saturn", name: "Saturn", first: 51, last: 60, dMin: 4.3, dMax: 5.6, features: SATURN,
     introduces: ["satellites", "movingWalls"], blurb: "Satellites hold the light, and the rings keep moving." },
-  { key: "uranus", name: "Uranus", first: 61, last: 70, dMin: 6.5, dMax: 8.5, features: SATURN,
+  { key: "uranus", name: "Uranus", first: 61, last: 70, dMin: 5, dMax: 6.4, features: SATURN,
     introduces: [], blurb: "Everything you know, tilted on its side." },
-  { key: "neptune", name: "Neptune", first: 71, last: 80, dMin: 7.5, dMax: 9.5, features: SATURN,
+  { key: "neptune", name: "Neptune", first: 71, last: 80, dMin: 5.8, dMax: 7.4, features: SATURN,
     introduces: [], blurb: "The far blue edge. Deep puzzles in cold light." },
-  { key: "blackhole", name: "The Black Hole", first: 81, last: Infinity, dMin: 8.5, dMax: 10, features: SATURN,
+  { key: "blackhole", name: "The Black Hole", first: 81, last: Infinity, dMin: 6.8, dMax: 10, features: SATURN,
     introduces: [], blurb: "Where the light bends hardest. It never ends." },
 ];
 
@@ -124,14 +133,18 @@ export function phaseFor(night: number): { phase: Phase; index: number } {
 /**
  * Target difficulty for a night: a ramp across its phase, with a small
  * sawtooth so the curve breathes instead of grinding monotonically upward.
- * Past night 90 the black hole simply stays at the top.
+ * The black hole keeps climbing for forty nights, then stays at the top.
  */
 export function nightDifficulty(night: number): number {
   const { phase, index } = phaseFor(night);
-  const span = Math.min(9, phase.last - phase.first);
+  // The black hole has no last night; it climbs over forty and then holds.
+  const span = Number.isFinite(phase.last) ? phase.last - phase.first : 40;
   const k = Math.min(1, index / Math.max(1, span));
-  const breathe = ((night * 7) % 5) * 0.12 - 0.24;
-  const d = phase.dMin + (phase.dMax - phase.dMin) * k + (index === 0 ? -0.3 : breathe);
+  const breathe = ((night * 7) % 5) * 0.08 - 0.16;
+  // A world's first night teaches, and its fifth is a breather: a win to
+  // carry into the harder second half.
+  const ease = index === 0 ? -0.3 : index === 4 ? -0.45 : breathe;
+  const d = phase.dMin + (phase.dMax - phase.dMin) * k + ease;
   return Math.max(1, Math.min(10, d));
 }
 

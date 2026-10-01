@@ -891,7 +891,9 @@ export function generateCampaignLevel(n: number, runSeed = 1): GenResult {
   return generateLevel((runSeed * 2654435761 + n * 40503) >>> 0, {
     difficulty: nightDifficulty(n),
     name: `Night ${n}`,
-    tolerance: 1.5,
+    // Tight, so the ramp is the ramp: a loose band let a night aimed at 1.9
+    // ship at 3.1. It still widens as attempts run out.
+    tolerance: 0.7,
     features: phase.features,
     require: nightRequires(n),
   });

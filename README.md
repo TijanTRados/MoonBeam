@@ -158,7 +158,12 @@ new idea at a time, with its explanation card.
 | 81+ | The Black Hole | everything, hardest, forever |
 
 Difficulty ramps across each world and steps back a little at the start of the
-next: new rules should be taught before they are tested. The moon waxes across
+next: new rules should be taught before they are tested. Each world's fifth night
+is a breather. The ramp was tuned from measurement (`tools/ramp-report.ts`):
+the first version asked for three or four pieces and two ring colours by night
+16 — in the same world that introduces colour — and playtesters stalled there.
+Now each world climbs about one point and the steep part is saved for the outer
+planets. The moon waxes across
 each world's ten nights — a thin crescent on the first, full on the tenth — so
 it doubles as a progress marker.
 
@@ -322,6 +327,7 @@ Developer tools:
 ```bash
 npx tsx tools/gen-report.ts 20 --draw   # generate a pack and print the boards
 npx tsx tools/fit-difficulty.ts         # re-fit the difficulty model
+npx tsx tools/ramp-report.ts 1 40       # what makes each night hard, averaged over seeds
 npx tsx tools/profile.ts                # time the hot paths
 ```
 

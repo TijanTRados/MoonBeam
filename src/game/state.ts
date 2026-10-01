@@ -299,6 +299,14 @@ export class Game {
       const l = this.lastArrival.get(i);
       if (l === undefined || g.order > l) this.lastArrival.set(i, g.order);
     }
+    // The cell the moon shines into first is never the end of a segment, so
+    // nothing above records the light reaching it. A star or ring sitting
+    // there is reached at the very start of the run.
+    for (const e of lv.emitters) {
+      const i = e.y * lv.w + e.x;
+      if (!this.firstArrival.has(i)) this.firstArrival.set(i, 0.01);
+      if (!this.lastArrival.has(i)) this.lastArrival.set(i, 0.01);
+    }
     this.cometAt = new Map(sim.cometHits.map((c) => [c.i, c.order]));
 
     // Everything that scores, keyed to the hop it happens at. The reveal pays
