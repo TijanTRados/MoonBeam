@@ -31,6 +31,7 @@
  * seed and target difficulty. Levels do not need to be stored or shipped — an
  * endless campaign is a counter.
  */
+import { cubeExit } from "./cube";
 import {
   Chan, Dir, DELTA, InventoryItem, Level, Light, Tile, TileKind, WHITE, Warp,
   inBounds, tileFrom, turnCCW, turnCW,
@@ -123,11 +124,13 @@ export function budgetFor(d: number, f: Features = defaultFeatures(d), boost: Fe
     asteroids: has("asteroids"),
     /** Rings needing two beams at once. */
     combined: has("combinedRings"),
+    /** Chance this level is a cube. Never more than half: a flat night between cubes is a rest. */
+    cubeChance: has("cube") ? (forced("cube") ? 1 : 0.45) : 0,
   };
 }
 type Budget = ReturnType<typeof budgetFor>;
 
-interface Branch { x: number; y: number; dir: Dir; light: Light; steps: number }
+interface Branch { x: number; y: number; dir: Dir; light: Light; steps: number; face: number }
 
 /**
  * Phase 1: walk the light and build the board underneath it.
@@ -136,7 +139,10 @@ interface Branch { x: number; y: number; dir: Dir; light: Light; steps: number }
  * leaves behind reproduces the walk when replayed. Where it differs from the
  * simulator is that on an empty cell it may *choose* to drop a piece.
  */
-function construct(r: Rand, w: number, h: number, d: number, b: Budget) {
+/** Cells along each edge of a cube's faces. */
+export const CUBE_SIZE = 5;
+
+function construct(r: Rand, w: number, h: number, d: number, b: Budget, cube: boolean) {
   const tiles: Tile[] = Array.from({ length: w * h }, () => ({ kind: "empty" as const }));
   const solutionCells: { i: number; kind: TileKind; mask?: Light; from?: Light }[] = [];
   const pathCells: number[] = [];
@@ -145,20 +151,31 @@ function construct(r: Rand, w: number, h: number, d: number, b: Budget) {
   const col = 1 + Math.floor(r() * (w - 2));
   const emitter = { x: col, y: 0, dir: Dir.Down, light: WHITE };
 
-  const queue: Branch[] = [{ ...emitter, steps: 0 }];
+  const queue: Branch[] = [{ ...emitter, steps: 0, face: 0 }];
   const terminals: { x: number; y: number; light: Light }[] = [];
   let placedCount = 0;
   let jumpUsed = false;
   const warps: Warp[] = [];
-  const warpBudget = chance(r, b.levelWarpChance) ? (d >= 8 && chance(r, 0.3) ? 2 : 1) : 0;
+  // A cube has no edges to warp: every edge already leads somewhere. It
+  // also asks for a piece fewer: going round the cube is the hard part.
+  const pieces = cube ? Math.max(2, b.pieces - 1) : b.pieces;
+  const warpBudget = !cube && chance(r, b.levelWarpChance) ? (d >= 8 && chance(r, 0.3) ? 2 : 1) : 0;
   const guard = new Set<string>();
 
   while (queue.length) {
     const br = queue.shift()!;
-    let { x, y, dir, light } = br;
+    let { x, y, dir, light, face } = br;
     let steps = br.steps;
 
     while (true) {
+      // On a cube, walking off an edge walks onto the next face — the same
+      // grid, met from another side.
+      if (cube && !inBounds({ w, h }, x, y) && steps <= w * h * 2) {
+        const s = cubeExit(w, face, x - DELTA[dir].x, y - DELTA[dir].y, dir);
+        ({ x, y, dir, face } = s);
+        steps++;
+        continue;
+      }
       // A branch reaching the edge may wrap round instead of ending: add a warp
       // for that row or column and carry on from the far side. The moon's own
       // column never wraps, so its gates never collide with the moon.
@@ -194,7 +211,7 @@ function construct(r: Rand, w: number, h: number, d: number, b: Budget) {
         break;
       }
 
-      const gk = `${x},${y},${dir},${light}`;
+      const gk = `${x},${y},${dir},${light},${face}`;
       if (guard.has(gk)) break; // walked into our own loop
       guard.add(gk);
 
@@ -269,11 +286,11 @@ function construct(r: Rand, w: number, h: number, d: number, b: Budget) {
         const next = applyExisting(cell, dir, light);
         if (!next.length) break;
         for (let k = 1; k < next.length; k++) {
-          queue.push({ x, y, dir: next[k].dir, light: next[k].light, steps: steps + 1 });
+          queue.push({ x, y, dir: next[k].dir, light: next[k].light, steps: steps + 1, face });
         }
         dir = next[0].dir; light = next[0].light;
       } else if (
-        placedCount < b.pieces &&
+        placedCount < pieces &&
         steps > 0 &&
         chance(r, steps < 2 ? 0.25 : 0.55)
       ) {
@@ -286,7 +303,7 @@ function construct(r: Rand, w: number, h: number, d: number, b: Budget) {
         const next = applyExisting(tiles[i], dir, light);
         if (!next.length) break;
         for (let k = 1; k < next.length; k++) {
-          queue.push({ x, y, dir: next[k].dir, light: next[k].light, steps: steps + 1 });
+          queue.push({ x, y, dir: next[k].dir, light: next[k].light, steps: steps + 1, face });
         }
         dir = next[0].dir; light = next[0].light;
       }
@@ -297,7 +314,7 @@ function construct(r: Rand, w: number, h: number, d: number, b: Budget) {
     }
   }
 
-  return { tiles, solutionCells, pathCells, emitter, terminals, warps, w, h };
+  return { tiles, solutionCells, pathCells, emitter, terminals, warps, w, h, cube };
 }
 
 /** The piece rules, shared by the walker so construction matches simulation. */
@@ -366,7 +383,7 @@ function excavate(
 
   const probe = (): Level => ({
     id: "probe", name: "probe", w, h, tiles,
-    emitters: [built.emitter], inventory: [], warps: built.warps,
+    emitters: [built.emitter], inventory: [], warps: built.warps, cube: built.cube || undefined,
   });
 
   /**
@@ -389,6 +406,19 @@ function excavate(
       const i = s.y0 * w + s.x0;
       if (tiles[i].kind === "empty") exits.add(i);
     }
+  }
+  // A cube has no exits — light never leaves, it goes round. Rings go where
+  // light first arrives on another face instead: cells the front never lights,
+  // so every ring on a cube can only be reached by going round it.
+  if (built.cube) {
+    const firstFace = new Map<number, number>();
+    const firstOrder = new Map<number, number>();
+    for (const s of simulate(probe(), 0).segments) {
+      if (s.warp || s.carry || !inBounds({ w, h }, s.x1, s.y1)) continue;
+      const i = s.y1 * w + s.x1;
+      if (!firstOrder.has(i) || s.order < firstOrder.get(i)!) { firstOrder.set(i, s.order); firstFace.set(i, s.face ?? 0); }
+    }
+    for (const [i, f] of firstFace) if (f !== 0 && tiles[i].kind === "empty") exits.add(i);
   }
   if (exits.size === 0) return null;
 
@@ -554,6 +584,7 @@ function excavate(
     difficulty: d,
     warps: built.warps.length ? built.warps : undefined,
     galaxy,
+    ...(built.cube ? { cube: true } : {}),
   };
 }
 
@@ -728,11 +759,18 @@ export function generateLevel(seed: number, opts: GenOptions = {}): GenResult {
 
   let best: GenResult | null = null;
 
+  // Cube or not is decided once per level, not per attempt: cube attempts
+  // fail more often, and rolling every attempt let the flat ones crowd the
+  // cubes out of the harder nights.
+  const cube = chance(rng(seed ^ 0xc0be), b.cubeChance);
+
   for (let n = 0; n < attempts; n++) {
     const s = (seed + n * 0x9e3779b1) >>> 0;
     const r = rng(s);
 
-    const built = construct(r, w, h, target, b);
+    // A cube is a smaller board: five by five on each face is already
+    // a hundred and fifty cells to think about, and the cube is the hard part.
+    const built = cube ? construct(r, CUBE_SIZE, CUBE_SIZE, target, b, true) : construct(r, w, h, target, b, false);
     const level = excavate(built, r, target, opts.name ?? `Seed ${seed}`, s, b);
     if (!level) continue;
 
@@ -756,6 +794,8 @@ export function generateLevel(seed: number, opts: GenOptions = {}): GenResult {
     for (const p of known) replay.tiles[p.i] = tileFrom(p);
     if (known.length === 0) continue;
     if (!evaluate(replay).won) continue;
+    // A cube level whose solution also works flat isn't using the cube.
+    if (cube && evaluate({ ...replay, cube: undefined }).won) continue;
 
     // Wall off any route cheaper than the one the level was built around, so
     // par reflects the idea in the level rather than an accident of geometry.
@@ -846,6 +886,7 @@ export function contains(l: Level, f: Feature): boolean {
     case "asteroids": return onBoard("asteroid");
     case "satellites": return onBoard("satellite");
     case "movingWalls": return l.tiles.some((t) => t.kind === "wall" && !!t.track);
+    case "cube": return !!l.cube;
   }
 }
 

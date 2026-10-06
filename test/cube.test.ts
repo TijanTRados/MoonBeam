@@ -2,8 +2,9 @@
  * The cube: its geometry must be consistent everywhere, because every puzzle
  * on it is a promise that light behaves the same over every edge.
  */
-import { DELTA, Dir, Level, Tile, WHITE, idx } from "../src/engine/types";
+import { DELTA, Dir, Level, Tile, WHITE, idx, tileFrom } from "../src/engine/types";
 import { evaluate, simulate } from "../src/engine/simulate";
+import { CUBE_SIZE, generateCampaignLevel } from "../src/engine/generate";
 import { FACES, cubeExit } from "../src/engine/cube";
 
 let passed = 0;
@@ -100,6 +101,27 @@ function board(n: number, col: number): Level {
   ok("light circling an empty cube terminates", r.segments.length > 7 && r.segments.length < 2000, `${r.segments.length}`);
   const faces = new Set(r.segments.map((sg) => sg.face ?? 0));
   ok("…having visited the faces round its loop", faces.size === 4, [...faces].join());
+}
+
+// ---------------------------------------------------------------- generated cubes
+
+{
+  // Uranus introduces the cube on its first night; after that, some nights are cubes.
+  let cubes = 0, needCube = 0, solvable = 0;
+  for (let n = 61; n <= 76; n++) {
+    const l = generateCampaignLevel(n).level;
+    if (n === 61) ok("the cube is introduced on night 61", !!l.cube && l.w === CUBE_SIZE && l.h === CUBE_SIZE);
+    if (!l.cube) continue;
+    cubes++;
+    const tiles = l.tiles.map((t) => ({ ...t }));
+    for (const p of l.solution ?? []) tiles[p.i] = tileFrom(p, true);
+    if (evaluate({ ...l, tiles }).won) solvable++;
+    if (!evaluate({ ...l, tiles, cube: undefined }).won) needCube++;
+  }
+  ok("cube nights turn up after the first", cubes >= 4, `${cubes}`);
+  ok("every generated cube is solvable", solvable === cubes, `${solvable}/${cubes}`);
+  ok("every generated cube needs the cube", needCube === cubes, `${needCube}/${cubes}`);
+  ok("no cube before Uranus", [1, 20, 45, 60].every((n) => !generateCampaignLevel(n).level.cube));
 }
 
 console.log(`\n  cube: ${passed} passed, ${failed} failed`);

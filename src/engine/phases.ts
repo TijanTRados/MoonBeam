@@ -30,6 +30,8 @@ export interface Features {
   asteroids: boolean;
   satellites: boolean;
   movingWalls: boolean;
+  /** The board is a cube, every face a copy of it. The advanced worlds only. */
+  cube: boolean;
 }
 export type Feature = keyof Features;
 
@@ -42,7 +44,7 @@ export type Feature = keyof Features;
 export const SOFT_GATE: Record<Feature, number> = {
   galaxy: 1.5, stars: 1.8, splitters: 2.2, crystals: 2.2, tints: 2.6, comets: 2.8,
   portals: 3, blackholes: 3.3, warps: 3.3, terrain: 3.3, combinedRings: 3.9,
-  asteroids: 3.8, satellites: 4.4, movingWalls: 4.6,
+  asteroids: 3.8, satellites: 4.4, movingWalls: 4.6, cube: 5,
 };
 
 /** Without a phase (tests, tools), what a difficulty allows by itself. */
@@ -50,7 +52,7 @@ export function defaultFeatures(d: number): Features {
   const gate: Record<Feature, number> = {
     galaxy: 1.5, stars: 3, splitters: 3, crystals: 4, tints: 5, comets: 4.5,
     portals: 6, blackholes: 6, warps: 4, terrain: 5, combinedRings: 6,
-    asteroids: 5.5, satellites: 6.5, movingWalls: 7,
+    asteroids: 5.5, satellites: 6.5, movingWalls: 7, cube: 8,
   };
   const f = {} as Features;
   for (const k of Object.keys(gate) as Feature[]) f[k] = d >= gate[k];
@@ -79,7 +81,7 @@ export interface Phase {
 const none: Features = {
   stars: false, splitters: false, galaxy: false, crystals: false, tints: false,
   comets: false, portals: false, terrain: false, warps: false, blackholes: false,
-  combinedRings: false, asteroids: false, satellites: false, movingWalls: false,
+  combinedRings: false, asteroids: false, satellites: false, movingWalls: false, cube: false,
 };
 const plus = (base: Features, ...add: Feature[]): Features => {
   const f = { ...base };
@@ -93,6 +95,7 @@ const MERCURY = plus(VENUS, "comets", "portals");
 const MARS = plus(MERCURY, "terrain", "warps", "blackholes", "combinedRings");
 const JUPITER = plus(MARS, "asteroids");
 const SATURN = plus(JUPITER, "satellites", "movingWalls");
+const URANUS = plus(SATURN, "cube");
 
 /*
  * The ramp, measured rather than guessed (`tools/ramp-report.ts`). What makes a
@@ -116,11 +119,11 @@ export const PHASES: Phase[] = [
     introduces: ["asteroids"], blurb: "The giant's asteroids drift through — now timing matters." },
   { key: "saturn", name: "Saturn", first: 51, last: 60, dMin: 4.3, dMax: 5.6, features: SATURN,
     introduces: ["satellites", "movingWalls"], blurb: "Satellites hold the light, and the rings keep moving." },
-  { key: "uranus", name: "Uranus", first: 61, last: 70, dMin: 5, dMax: 6.4, features: SATURN,
-    introduces: [], blurb: "Everything you know, tilted on its side." },
-  { key: "neptune", name: "Neptune", first: 71, last: 80, dMin: 5.8, dMax: 7.4, features: SATURN,
+  { key: "uranus", name: "Uranus", first: 61, last: 70, dMin: 5, dMax: 6.4, features: URANUS,
+    introduces: ["cube"], blurb: "Everything you know, tilted on its side — and folded into a cube." },
+  { key: "neptune", name: "Neptune", first: 71, last: 80, dMin: 5.8, dMax: 7.4, features: URANUS,
     introduces: [], blurb: "The far blue edge. Deep puzzles in cold light." },
-  { key: "blackhole", name: "The Black Hole", first: 81, last: Infinity, dMin: 6.8, dMax: 10, features: SATURN,
+  { key: "blackhole", name: "The Black Hole", first: 81, last: Infinity, dMin: 6.8, dMax: 10, features: URANUS,
     introduces: [], blurb: "Where the light bends hardest. It never ends." },
 ];
 

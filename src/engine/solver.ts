@@ -297,9 +297,18 @@ const COEF: readonly number[] = [
   0.0819,  // combined
 ];
 
+/**
+ * What a cube adds, in difficulty points. Set by hand, not fitted: the model
+ * above was fitted on flat boards, where a level's difficulty is mostly its
+ * piece count — and a cube level deliberately asks for fewer pieces on a
+ * smaller board, because thinking about six faces at once is the hard part.
+ * Without this, every cube read as easy and was turned away.
+ */
+const CUBE_DIFFICULTY = 1.2;
+
 export function scoreDifficulty(level: Level, res: SolveResult): number {
   const f = features(level, res);
-  let raw = COEF[0];
+  let raw = COEF[0] + (level.cube ? CUBE_DIFFICULTY : 0);
   for (let i = 0; i < f.length; i++) raw += f[i] * (COEF[i + 1] ?? 0);
   return Math.max(1, Math.min(10, Math.round(raw * 10) / 10));
 }
