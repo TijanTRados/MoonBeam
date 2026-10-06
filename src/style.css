@@ -701,44 +701,6 @@ body .text-input { -webkit-user-select: text; user-select: text; }
 .rush-points { font: 800 18px Nunito, sans-serif; color: #ffe066; margin: 6px 0; }
 .icon-btn[hidden], .chip[hidden] { display: none; }
 
-/* ------------------------------------------------------------- the pixel look
- *
- * Modern panels — glass, gradients, soft type — with pixel-art edges: corners
- * notched one art pixel deep and a crisp inset outline, like a 16-bit window
- * frame. Body text stays smooth; headings are already the pixel face.
- */
-.pixelated { image-rendering: pixelated; image-rendering: crisp-edges; }
-
-html.pixel {
-  --px: 3px;
-  --notch: polygon(var(--px) 0, calc(100% - var(--px)) 0, calc(100% - var(--px)) var(--px), 100% var(--px),
-    100% calc(100% - var(--px)), calc(100% - var(--px)) calc(100% - var(--px)), calc(100% - var(--px)) 100%,
-    var(--px) 100%, var(--px) calc(100% - var(--px)), 0 calc(100% - var(--px)), 0 var(--px), var(--px) var(--px));
-}
-html.pixel :is(.btn, .slot, .chip, .night, .tab, .tabs, .icon-btn, .tray-caption, .toast, .score-pill,
-  .ranks-list li, .boost-list li, .badge, .piece-tag, .text-input, .caption-info) {
-  border-radius: 0;
-  clip-path: var(--notch);
-}
-html.pixel .card {
-  --px: 5px;
-  border-radius: 0;
-  clip-path: var(--notch);
-  box-shadow: inset 0 0 0 var(--px) rgba(226, 216, 255, 0.08), inset 0 0 0 calc(var(--px) + 2px) rgba(0, 0, 0, 0.25);
-  background-image:
-    linear-gradient(180deg, var(--night-soft), var(--night-mid)),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 4px);
-  background-blend-mode: normal;
-}
-html.pixel .btn { box-shadow: inset 0 calc(var(--px) * -1) 0 rgba(0, 0, 0, 0.28), inset 0 var(--px) 0 rgba(255, 255, 255, 0.12); }
-html.pixel .btn:active { transform: translateY(2px); box-shadow: inset 0 var(--px) 0 rgba(0, 0, 0, 0.28); }
-html.pixel .slot.selected { box-shadow: inset 0 0 0 var(--px) var(--accent); }
-html.pixel .night.current { box-shadow: inset 0 0 0 var(--px) var(--world, var(--accent)); }
-html.pixel .ranks-list li.you { box-shadow: inset 0 0 0 var(--px) var(--accent); }
-html.pixel .icon-btn.nudge { animation: none; box-shadow: inset 0 0 0 var(--px) #fff6; }
-html.pixel .world-orb { border-radius: 0; clip-path: polygon(30% 0, 70% 0, 70% 10%, 90% 10%, 90% 30%, 100% 30%, 100% 70%, 90% 70%, 90% 90%, 70% 90%, 70% 100%, 30% 100%, 30% 90%, 10% 90%, 10% 70%, 0 70%, 0 30%, 10% 30%, 10% 10%, 30% 10%); }
-html.pixel .slot canvas, html.pixel .legend canvas { image-rendering: pixelated; }
-
 /* ------------------------------------------------------------- the cube */
 
 .board-wrap { perspective: 1100px; }
@@ -755,5 +717,3 @@ html.pixel .slot canvas, html.pixel .legend canvas { image-rendering: pixelated;
 }
 .cube-net button.lit { background: rgba(255, 233, 168, 0.55); box-shadow: 0 0 6px rgba(255, 233, 168, 0.7); }
 .cube-net button.on { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 0; }
-html.pixel .cube-net { border-radius: 0; clip-path: var(--notch); }
-html.pixel .cube-net button { border-radius: 0; }
