@@ -680,3 +680,9 @@ body .text-input { -webkit-user-select: text; user-select: text; }
 .map-wrap { flex: 1; position: relative; overflow-y: auto; overscroll-behavior: contain; }
 .map-canvas { position: sticky; top: 0; display: block; width: 100%; height: 100%; margin-bottom: -100%; cursor: pointer; }
 #map-spacer { width: 1px; }
+
+/* ------------------------------------------------------------- the moon's clock */
+
+.meta .clock { font-variant-numeric: tabular-nums; color: var(--moon); }
+.meta .clock.low { color: #ff8fb1; animation: clock-low 1s ease-in-out infinite; }
+@keyframes clock-low { 50% { opacity: 0.55; } }

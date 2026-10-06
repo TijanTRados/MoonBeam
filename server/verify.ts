@@ -31,7 +31,7 @@ export interface Submission {
   placements: Placement[];
   /** The tick of board time the light was fired at. */
   fireTick: number;
-  /** Seconds taken — dailies only, used to break ties. */
+  /** Seconds taken, used only to break ties. */
   seconds?: number;
   /** The client's fingerprint of the board it played. */
   hash: string;
@@ -131,6 +131,8 @@ export function verify(sub: Submission, now = new Date()): Verdict {
   // First-try is the one bonus that can't be checked, so the leaderboard
   // leaves it out: points are the run itself plus the piece-count bonus.
   const points = scoreRun(played, sim).total + bonuses(used, fewest, false).reduce((s, b) => s + b.points, 0);
-  const seconds = sub.kind === "daily" && isInt(sub.seconds, 0, 86_400 * 2) ? sub.seconds : 0;
+  // Time only breaks ties, and is the one thing taken on trust: the server
+  // can replay a solve, but not watch it being made.
+  const seconds = isInt(sub.seconds, 0, 86_400 * 2) ? sub.seconds : 0;
   return { ok: true, result: { points, used, fewest, seconds } };
 }

@@ -11,7 +11,7 @@ import { Segment, SimResult, evaluate, simulate } from "./engine/simulate";
 import { PHASES, Phase as World, PhaseKey, phaseFor } from "./engine/phases";
 import { Game, loadProgress, saveProgress, Progress, RevealTick } from "./game/state";
 import { INFO, PieceKey, demoLevel, describe, infoKey, kindsIn } from "./game/info";
-import { bonuses } from "./game/score";
+import { bonuses, timeLimit } from "./game/score";
 import { TOOLS, TOOL_TIPS, sandboxLevel, sandboxTap } from "./game/sandbox";
 import { BOOSTERS, BoosterKey, applicable, earned as dustFor } from "./game/stardust";
 import { MEDALS, constellationOf, medalCount, medalsFor, newMedals } from "./game/medals";
@@ -52,8 +52,11 @@ let endlessSeed = Date.now() >>> 0;
 let sandbox = false;
 /** Playing a daily puzzle: its number, or 0. */
 let dailyN = 0;
-/** Seconds spent on the daily so far — only while it is on screen. */
-let dailySeconds = 0;
+/** Seconds spent on this level so far — only while it is on screen and being built. */
+let levelSeconds = 0;
+/** How long the moon stays up on this level; 0 for no clock (the Galaxy). */
+let limitSeconds = 0;
+let moonSetToasted = false;
 let toolSel = 0;
 
 /** The current world's look, and how full its moon is tonight. */
@@ -124,10 +127,13 @@ function frame(nowMs: number) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     game.tickClock(dt);
-    if (dailyN && game.phase !== "won" && $("#piece-card").hidden) {
-      const before = Math.floor(dailySeconds);
-      dailySeconds += dt;
-      if (Math.floor(dailySeconds) !== before) renderDailyClock();
+    // The clock runs while you think — not while the light is travelling,
+    // not under a card, and not once the night is solved.
+    if (limitSeconds && (game.phase === "build" || game.phase === "lost") &&
+        $("#piece-card").hidden && $("#world-card").hidden && $("#boost-card").hidden) {
+      const before = Math.floor(levelSeconds);
+      levelSeconds += dt;
+      if (Math.floor(levelSeconds) !== before) renderClock();
     }
     if (game.phase === "running") handleReveal(game.advance(dt), t);
     for (const [k, v] of gateFlash) {
@@ -169,6 +175,7 @@ function frame(nowMs: number) {
       theme,
       cometCollected,
       gateFlash,
+      timer: limitSeconds ? Math.max(0, 1 - levelSeconds / limitSeconds) : undefined,
     });
   }
 
@@ -409,7 +416,7 @@ async function sendScore(assisted: boolean) {
     ...where,
     placements: placementsOf(game.board),
     fireTick: game.firedAt,
-    seconds: dailyN ? Math.round(dailySeconds) : undefined,
+    seconds: Math.round(levelSeconds),
     hash: levelHash(game.level),
   };
   const me = player();
@@ -749,7 +756,7 @@ function onSettled() {
     const s = game.score();
     const earned = 1 + s.stars;
     const firstTry = s.firstTry;
-    const total = s.points + bonuses(s.used, s.par, s.firstTry).reduce((n, b) => n + b.points, 0);
+    const total = s.points + bonuses(s.used, s.par, s.firstTry, secondsLeft()).reduce((n, b) => n + b.points, 0);
     let newBest = false;
     wonMedals = [];
     // Only a first solve earns stardust, so nothing can be farmed.
@@ -1101,6 +1108,7 @@ function startLevel(n: number, isEndless = false) {
     if (currentScreen !== "game" || night !== n) return;
 
     game = new Game(gen.level);
+    startClock(gen.level);
     $("[data-action=boosters]").hidden = false;
     $("[data-action=hint]").classList.remove("nudge");
     renderSkip();
@@ -1129,7 +1137,6 @@ function startDaily() {
   sandbox = false;
   dailyN = n;
   night = 0;
-  dailySeconds = 0;
   setWorld(dailyWorld(n), dailyMoon(n));
   $("#level-name").textContent = `Daily #${n}`;
   $("#level-meta").innerHTML = "<span>composing…</span>";
@@ -1144,6 +1151,7 @@ function startDaily() {
     if (!level) { level = generateDaily(n).level; dailyCache.set(n, level); }
     if (currentScreen !== "game" || dailyN !== n) return;
     game = new Game(level);
+    startClock(level);
     $("[data-action=boosters]").hidden = false;
     $("[data-action=hint]").classList.remove("nudge");
     renderSkip();
@@ -1161,11 +1169,37 @@ function startDaily() {
 /** The daily's header line: the day, the clock, and the fewest pieces. */
 function renderDailyClock() {
   if (!dailyN) return;
-  const done = progress.daily[dailyN];
   $("#level-meta").innerHTML =
     `<span>${WEEKDAY_NAMES[weekday(dailyN)]}</span>` +
-    `<span class="clock">${done ? `✓ ${formatTime(done.seconds)}` : `⏱ ${formatTime(dailySeconds)}`}</span>` +
+    `<span class="clock" id="level-clock"></span>` +
     (game ? `<span>fewest ${game.level.par ?? "?"}</span>` : "");
+  renderClock();
+}
+
+// ---------------------------------------------------------------- the clock
+
+/** Set the moon's clock for a level and start it from zero. */
+function startClock(level: Level) {
+  levelSeconds = 0;
+  limitSeconds = timeLimit(level);
+  moonSetToasted = false;
+  renderClock();
+}
+
+const secondsLeft = () => (limitSeconds ? Math.max(0, limitSeconds - levelSeconds) : 0);
+
+function renderClock() {
+  const el = document.getElementById("level-clock");
+  if (!el || !limitSeconds) return;
+  const left = secondsLeft();
+  el.textContent = left > 0 ? `☾ ${formatTime(Math.ceil(left))}` : "☾ set";
+  el.classList.toggle("low", left > 0 && left < limitSeconds * 0.2);
+  el.title = left > 0 ? "Solve before the moon sets for a time bonus" : "The moon has set: no time bonus, but take your time";
+  if (left <= 0 && !moonSetToasted && game?.phase !== "won") {
+    moonSetToasted = true;
+    toast("The moon has set — no time bonus now, but the night is still yours.", 3000);
+    musicBrightness(0.25, 1.5);
+  }
 }
 
 /** Record the first solve of a daily, and move the streak on. */
@@ -1173,7 +1207,7 @@ function recordDaily(s: ReturnType<Game["score"]>, total: number): DailyResult {
   const existing = progress.daily[dailyN];
   if (existing) return existing;
   const r: DailyResult = {
-    points: total, used: s.used, fewest: s.par, seconds: Math.round(dailySeconds),
+    points: total, used: s.used, fewest: s.par, seconds: Math.round(levelSeconds),
     misses: game?.misses ?? 0, assisted: s.assisted,
   };
   progress.daily[dailyN] = r;
@@ -1210,6 +1244,7 @@ function startSandbox() {
   toolSel = 0;
   setWorld("neptune", 1);
   game = new Game(sandboxLevel());
+  limitSeconds = 0;
   renderSkip();
   winGlow = 0; flare = 0; climaxed = false;
   clearFx(); boardFx.clear();
@@ -1259,7 +1294,9 @@ function renderMeta(l: Level) {
   $("#level-meta").innerHTML =
     `<span class="pips" title="Difficulty ${l.difficulty}">${pips}</span>` +
     `<span title="The fewest pieces this night can be solved with">fewest ${l.par ?? "?"}</span>` +
+    `<span class="clock" id="level-clock"></span>` +
     (night > 0 && !endless ? medalRow(medalsOf(night)) : "");
+  renderClock();
 }
 
 /** A night's medals, counting nights solved before medals existed as lit. */
@@ -1327,7 +1364,7 @@ function showWin(s: ReturnType<Game["score"]>, points: number, newBest: boolean)
     .join("");
 
   $("#win-dust").textContent = dustGained > 0 ? `✦ +${dustGained} stardust` : "";
-  const rows = [{ label: "This run", points: s.points }, ...bonuses(s.used, s.par, s.firstTry)];
+  const rows = [{ label: "This run", points: s.points }, ...bonuses(s.used, s.par, s.firstTry, secondsLeft())];
   $("#win-points").innerHTML =
     rows.map((r, k) =>
       `<div class="pt-row${r.points < 0 ? " neg" : ""}" style="animation-delay:${0.6 + k * 0.12}s">` +
@@ -1621,6 +1658,7 @@ document.addEventListener("click", (e) => {
     case "piece-ok": nextCard(); break;
     case "replay":
       $("#win").hidden = true; game?.reset(); clearFx(); boardFx.clear(); climaxed = false;
+      if (game && limitSeconds) startClock(game.level);
       musicBrightness(0.35, 0.8); renderTray();
       break;
     case "next": $("#win").hidden = true; startLevel(night + 1, endless); break;

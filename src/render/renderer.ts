@@ -64,6 +64,8 @@ export interface ViewState {
   cometCollected?: number;
   /** Warp gates flashing as light passes through them: "axis:index" -> 0..1. */
   gateFlash?: Map<string, number>;
+  /** Time left before the moon sets, 0..1; undefined for no clock. */
+  timer?: number;
 }
 
 export interface Layout {
@@ -982,11 +984,42 @@ function drawMoon(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
     const r = L.cell * 0.38;
     const bob = Math.sin(v.time * 1.1) * L.cell * 0.035;
     const release = v.sim && v.reveal > 0 && v.reveal < 1.1 ? Math.max(0, 1 - v.reveal * 2.2) : 0;
+    // The clock: the moon slowly sinks as its time runs out.
+    const sink = v.timer === undefined ? 0 : (1 - v.timer) * L.cell * 0.12;
     ctx.save();
-    ctx.translate(px, py + bob);
+    ctx.translate(px, py + bob + sink);
+    if (v.timer !== undefined) drawMoonClock(ctx, r, v.timer, v.time);
     paintMoon(ctx, r, v.moonLit ?? 0.35, v.time, release, P.moonGlow);
     ctx.restore();
   }
+}
+
+/**
+ * A ring round the moon that drains as its time runs out — gold while there
+ * is plenty, turning rose and breathing faster in the last fifth.
+ */
+function drawMoonClock(ctx: CanvasRenderingContext2D, r: number, left: number, time: number) {
+  const R = r * 1.55;
+  const low = left < 0.2;
+  const pulse = low ? 0.6 + 0.4 * Math.sin(time * 9) : 1;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineWidth = Math.max(1.5, r * 0.12);
+  ctx.strokeStyle = alpha("#ffffff", 0.08);
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.stroke();
+  if (left > 0) {
+    ctx.strokeStyle = alpha(low ? "#ff8fb1" : "#ffd27d", 0.85 * pulse);
+    ctx.shadowColor = low ? "#ff8fb1" : "#ffd27d";
+    ctx.shadowBlur = r * 0.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+    ctx.stroke();
+    // A bright bead on the leading end, like the moon's own satellite.
+    const a = -Math.PI / 2 + Math.PI * 2 * left;
+    ctx.fillStyle = alpha("#ffffff", 0.9 * pulse);
+    ctx.beginPath(); ctx.arc(Math.cos(a) * R, Math.sin(a) * R, ctx.lineWidth * 0.75, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawWinGlow(ctx: CanvasRenderingContext2D, w: number, h: number, v: ViewState) {

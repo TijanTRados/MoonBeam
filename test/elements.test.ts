@@ -7,7 +7,7 @@
  */
 import { Chan, Dir, Level, Tile, WHITE, idx } from "../src/engine/types";
 import { HOPS_PER_TICK, evaluate, simulate } from "../src/engine/simulate";
-import { POINTS, scoreRun, bonuses } from "../src/game/score";
+import { POINTS, scoreRun, bonuses, timeLimit } from "../src/game/score";
 import { generateLevel } from "../src/engine/generate";
 import { tileFrom } from "../src/engine/types";
 
@@ -184,6 +184,12 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
   ok("every extra piece costs points",
      over.length === 1 && over[0].points === 2 * POINTS.extraPiece && over[0].points < 0, JSON.stringify(over));
   ok("first try is a bonus", bonuses(5, 5, true).some((x) => x.label === "First try"));
+  ok("time left is a bonus", bonuses(5, 5, false, 30.7).some((x) => x.points === 30 * POINTS.timeLeft));
+  ok("no time left, no time bonus", !bonuses(5, 5, false, 0).some((x) => x.label.startsWith("Time")));
+  ok("the moon stays up longer for harder nights",
+     timeLimit({ par: 1, difficulty: 1 }) < timeLimit({ par: 3, difficulty: 3 }) &&
+     timeLimit({ par: 3, difficulty: 3 }) < timeLimit({ par: 5, difficulty: 6 }));
+  ok("a first night allows over a minute", timeLimit({ par: 1, difficulty: 1 }) >= 60);
 }
 
 {

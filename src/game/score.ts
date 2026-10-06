@@ -32,7 +32,23 @@ export const POINTS = {
   /** Per piece beyond the fewest. */
   extraPiece: -30,
   firstTry: 50,
+  /** Per second left on the clock when the night is solved. */
+  timeLeft: 2,
 } as const;
+
+/**
+ * How long the moon stays up: a night's time limit, in seconds.
+ *
+ * Generous on purpose — it is there to make a quick solve feel good, not to
+ * make a slow one feel bad. Missing it costs only the time bonus, never the
+ * night. It grows with what there is to do: pieces that must be right, and
+ * the rated difficulty, which carries everything else.
+ */
+export function timeLimit(level: { par?: number; difficulty?: number }): number {
+  const pieces = Math.max(1, level.par ?? 1);
+  const d = Math.max(1, level.difficulty ?? 1);
+  return Math.round((40 + 20 * pieces + 8 * d) / 5) * 5;
+}
 
 /** Points for one hop of light: nothing for jumps or light leaving the board. */
 export function segmentPoints(level: Level, s: Segment, galaxy: Set<number>): number {
@@ -80,7 +96,7 @@ export interface Bonus { label: string; points: number }
  * `fewest` is the smallest number of pieces the level can be solved with —
  * what golfers would call par. Every piece beyond it costs points.
  */
-export function bonuses(used: number, fewest: number, firstTry: boolean): Bonus[] {
+export function bonuses(used: number, fewest: number, firstTry: boolean, secondsLeft = 0): Bonus[] {
   const out: Bonus[] = [];
   if (fewest > 0) {
     if (used < fewest) {
@@ -93,5 +109,7 @@ export function bonuses(used: number, fewest: number, firstTry: boolean): Bonus[
     }
   }
   if (firstTry) out.push({ label: "First try", points: POINTS.firstTry });
+  const left = Math.floor(Math.max(0, secondsLeft));
+  if (left > 0) out.push({ label: `Time bonus · ${left}s left`, points: left * POINTS.timeLeft });
   return out;
 }
