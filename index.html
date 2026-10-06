@@ -28,7 +28,10 @@
     <p class="tagline">The moon is shining.<br />Build the path.</p>
     <nav class="menu">
       <button class="btn btn-primary" data-action="play">Continue</button>
-      <button class="btn btn-daily" data-action="daily">Daily puzzle <small id="daily-sub"></small></button>
+      <div class="menu-row">
+        <button class="btn btn-daily" data-action="daily">Daily <small id="daily-sub"></small></button>
+        <button class="btn btn-rush" data-action="rush">Moon Rush <small>beat the moonset</small></button>
+      </div>
       <div class="menu-row">
         <button class="btn" data-action="nights">Nights</button>
         <button class="btn" data-action="map">Star map</button>
@@ -175,6 +178,23 @@
       <p id="world-new" class="world-new"></p>
       <div class="card-actions">
         <button class="btn btn-primary" data-action="world-ok">Let's go</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- rush over -->
+  <div id="rush-card" class="overlay" hidden>
+    <div class="card">
+      <div class="piece-tag">Moon Rush</div>
+      <h3>The moon has set</h3>
+      <div class="rush-big"><b id="rush-solved">0</b><span>nights solved</span></div>
+      <p id="rush-points" class="rush-points"></p>
+      <p id="rush-best" class="muted small"></p>
+      <p id="rush-rank" class="win-rank"></p>
+      <div class="card-actions">
+        <button class="btn btn-ghost" data-action="rush-home">Home</button>
+        <button class="btn btn-ghost" data-action="rush-share">Share</button>
+        <button class="btn btn-primary" data-action="rush-again">Again</button>
       </div>
     </div>
   </div>

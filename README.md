@@ -214,6 +214,19 @@ the moon waxes through the week to match. Solving it moves a day streak on; the
 share card shows one moon per Shine — dark for a miss, full for the solve — with
 points, pieces and time, and never the board.
 
+### The moon's clock, and Moon Rush
+
+Every night has a generous time limit, shown as a ring round the moon that
+drains as the moon slowly sets. Solving with time left earns 2 points a
+second; running out costs only that bonus, never the night.
+
+**Moon Rush** is the arcade mode: ninety seconds on the clock, and every solve
+puts time back (15s plus 10s per piece) and serves a harder puzzle, climbing
+the worlds as it goes. Skipping costs 20 seconds; hints and boosters stay at
+home. Everyone gets the same sequence each day (`src/game/rush.ts`), and a
+rush has its own leaderboard — every solve in the run is replayed by the
+server; only the clock is taken on trust.
+
 ### Getting unstuck, and stardust
 
 Hints are free and come in two steps per piece, following the light: first the

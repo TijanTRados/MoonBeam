@@ -686,3 +686,17 @@ body .text-input { -webkit-user-select: text; user-select: text; }
 .meta .clock { font-variant-numeric: tabular-nums; color: var(--moon); }
 .meta .clock.low { color: #ff8fb1; animation: clock-low 1s ease-in-out infinite; }
 @keyframes clock-low { 50% { opacity: 0.55; } }
+
+/* ------------------------------------------------------------- Moon Rush */
+
+.btn-rush {
+  background: linear-gradient(180deg, rgba(255, 143, 177, 0.24), rgba(255, 143, 177, 0.1));
+  border-color: rgba(255, 143, 177, 0.5);
+  color: #ffd1de;
+}
+.btn-rush small { display: block; font-size: 11px; color: var(--ink-dim); font-weight: 600; margin-top: 2px; }
+.rush-big { display: grid; place-items: center; margin: 8px 0 4px; }
+.rush-big b { font: 800 56px/1 Nunito, sans-serif; color: var(--moon); text-shadow: 0 0 24px rgba(255, 230, 168, 0.5); }
+.rush-big span { color: var(--ink-dim); font-size: 13px; }
+.rush-points { font: 800 18px Nunito, sans-serif; color: #ffe066; margin: 6px 0; }
+.icon-btn[hidden], .chip[hidden] { display: none; }

@@ -14,6 +14,7 @@ import { INFO, PieceKey, demoLevel, describe, infoKey, kindsIn } from "./game/in
 import { bonuses, timeLimit } from "./game/score";
 import { TOOLS, TOOL_TIPS, sandboxLevel, sandboxTap } from "./game/sandbox";
 import { BOOSTERS, BoosterKey, applicable, earned as dustFor } from "./game/stardust";
+import { RUSH_SKIP, RUSH_START, RushResult, rushLevel, rushReward, rushShare, rushWorld } from "./game/rush";
 import { MEDALS, constellationOf, medalCount, medalsFor, newMedals } from "./game/medals";
 import { MapLayout, MapWorld, boxAt, drawStarMap, layoutStarMap } from "./render/starmap";
 import {
@@ -21,7 +22,7 @@ import {
   nextStreak, shareText, todayNumber, weekday,
 } from "./game/daily";
 import {
-  BoardKind, SubmitBody, fetchBoard, fetchLadder, flushPending, forgetMe, leaderboardsEnabled,
+  BoardKind, SolveBody, SubmitBody, fetchBoard, fetchLadder, flushPending, forgetMe, leaderboardsEnabled,
   placementsOf, player, rename, setPlayer, submit, validName,
 } from "./net/leaderboard";
 import { cellAt, computeLayout, draw, drawIcon, frontOf } from "./render/renderer";
@@ -52,6 +53,19 @@ let endlessSeed = Date.now() >>> 0;
 let sandbox = false;
 /** Playing a daily puzzle: its number, or 0. */
 let dailyN = 0;
+
+/** A Moon Rush in progress, or null. */
+let rush: {
+  day: number;
+  /** The puzzle on the board: its place in the day's sequence. */
+  k: number;
+  /** Seconds left before the moon sets and the run ends. */
+  clock: number;
+  solved: number;
+  points: number;
+  solves: (SolveBody & { k: number })[];
+  over: boolean;
+} | null = null;
 /** Seconds spent on this level so far — only while it is on screen and being built. */
 let levelSeconds = 0;
 /** How long the moon stays up on this level; 0 for no clock (the Galaxy). */
@@ -127,6 +141,13 @@ function frame(nowMs: number) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     game.tickClock(dt);
+    if (rush && !rush.over && (game.phase === "build" || game.phase === "lost") &&
+        $("#piece-card").hidden && $("#world-card").hidden) {
+      const before = Math.ceil(rush.clock);
+      rush.clock -= dt;
+      if (Math.ceil(rush.clock) !== before) renderRushMeta();
+      if (rush.clock <= 0) endRush();
+    }
     // The clock runs while you think — not while the light is travelling,
     // not under a card, and not once the night is solved.
     if (limitSeconds && (game.phase === "build" || game.phase === "lost") &&
@@ -175,7 +196,8 @@ function frame(nowMs: number) {
       theme,
       cometCollected,
       gateFlash,
-      timer: limitSeconds ? Math.max(0, 1 - levelSeconds / limitSeconds) : undefined,
+      timer: rush ? Math.max(0, Math.min(1, rush.clock / RUSH_START))
+        : limitSeconds ? Math.max(0, 1 - levelSeconds / limitSeconds) : undefined,
     });
   }
 
@@ -527,7 +549,142 @@ let forgetArmed = 0;
 /** After enough misses on a campaign night, offer a way past it. */
 function renderSkip() {
   const b = $("[data-action=skip]");
+  if (rush) { b.hidden = false; b.textContent = `Skip −${RUSH_SKIP}s`; return; }
+  b.textContent = "Skip ›";
   b.hidden = !game || sandbox || endless || !!dailyN || game.misses < 5 || game.phase === "won";
+}
+
+// ---------------------------------------------------------------- Moon Rush
+
+function startRush() {
+  endless = false; sandbox = false; dailyN = 0; night = 0;
+  limitSeconds = 0;
+  rush = { day: todayNumber(), k: 1, clock: RUSH_START, solved: 0, points: 0, solves: [], over: false };
+  $("#rush-card").hidden = true;
+  show("game");
+  loadRushPuzzle();
+}
+
+const rushCache = new Map<string, Level>();
+function rushPuzzle(day: number, k: number): Level {
+  const key = `${day}:${k}`;
+  let l = rushCache.get(key);
+  if (!l) { l = rushLevel(day, k).level; rushCache.set(key, l); }
+  return l;
+}
+
+/** Put the run's current puzzle on the board. Help stays at home in a rush. */
+function loadRushPuzzle() {
+  if (!rush) return;
+  const r = rush;
+  setWorld(rushWorld(r.k), moonForNight((r.k - 1) % 10));
+  $("#tray").innerHTML = "";
+  $("#win").hidden = true;
+  game = null;
+  setTimeout(() => {
+    if (rush !== r || currentScreen !== "game") return;
+    const level = rushPuzzle(r.day, r.k);
+    game = new Game(level);
+    $("[data-action=boosters]").hidden = true;
+    $("[data-action=hint]").hidden = true;
+    winGlow = 0; flare = 0; climaxed = false;
+    clearFx(); boardFx.clear();
+    musicBrightness(0.5, 0.6);
+    renderRushMeta();
+    renderTray();
+    renderSkip();
+    introduceNewPieces(level);
+  }, 16);
+}
+
+function renderRushMeta() {
+  if (!rush) return;
+  $("#level-name").textContent = `Moon Rush · ${rush.k}`;
+  const low = rush.clock < 15;
+  $("#level-meta").innerHTML =
+    `<span class="clock${low ? " low" : ""}">☾ ${formatTime(Math.max(0, Math.ceil(rush.clock)))}</span>` +
+    `<span>${rush.solved} solved</span><span>✦ ${rush.points}</span>`;
+}
+
+function rushSolved() {
+  if (!rush || !game) return;
+  if (!climaxed) celebrate(now());
+  const s = game.score();
+  // Scored the way the leaderboard scores it, so the two always agree.
+  const pts = s.points + bonuses(s.used, s.par, false).reduce((n, b) => n + b.points, 0);
+  const reward = rushReward(s.par);
+  rush.points += pts;
+  rush.solved++;
+  rush.clock += reward;
+  rush.solves.push({ k: rush.k, placements: placementsOf(game.board), fireTick: game.firedAt, hash: levelHash(game.level) });
+  toast(`+${reward}s · ✦ ${pts}`, 1100);
+  renderRushMeta();
+  const r = rush;
+  window.setTimeout(() => {
+    if (rush !== r || r.over) return;
+    r.k++;
+    loadRushPuzzle();
+  }, 1200);
+}
+
+function skipRush() {
+  if (!rush || rush.over || game?.phase === "running") return;
+  rush.clock -= RUSH_SKIP;
+  sfxRemove();
+  if (rush.clock <= 0) { endRush(); return; }
+  rush.k++;
+  loadRushPuzzle();
+}
+
+/** The moon has set: the run is over. */
+function endRush() {
+  if (!rush || rush.over) return;
+  rush.over = true;
+  rush.clock = 0;
+  renderRushMeta();
+  sfxMiss();
+  musicBrightness(0.3, 1.2);
+  const result: RushResult = { solved: rush.solved, points: rush.points };
+  const today = progress.rushBest[rush.day];
+  const better = (a: RushResult, b?: RushResult) => !b || a.solved > b.solved || (a.solved === b.solved && a.points > b.points);
+  const newDay = better(result, today);
+  const newRecord = better(result, progress.rushRecord);
+  if (newDay) progress.rushBest[rush.day] = result;
+  if (newRecord) progress.rushRecord = result;
+  saveProgress(progress);
+
+  $("#rush-solved").textContent = String(result.solved);
+  $("#rush-points").textContent = `✦ ${result.points}`;
+  $("#rush-best").textContent = newRecord && result.solved > 0 ? "A new record!"
+    : `Best today: ${(progress.rushBest[rush.day] ?? result).solved} · all-time: ${progress.rushRecord.solved}`;
+  $("#rush-rank").textContent = "";
+  window.setTimeout(() => { $("#rush-card").hidden = false; }, 700);
+  if (result.solved > 0) void sendRush();
+}
+
+async function sendRush() {
+  if (!rush || !leaderboardsEnabled()) return;
+  const me = player();
+  if (!me.optIn || !me.name) return;
+  const el = $("#rush-rank");
+  el.textContent = "Sending to the leaderboard…";
+  try {
+    const r = await submit({ kind: "rush", id: rush.day, solves: rush.solves });
+    el.textContent = r ? `🏆 #${r.rank} of ${r.total} in today's rush` : "";
+  } catch (e) {
+    el.textContent = (e as { status?: number }).status === undefined
+      ? "Couldn't reach the leaderboard — it'll be sent next time." : `Not ranked: ${(e as Error).message}.`;
+  }
+}
+
+async function shareRush() {
+  if (!rush) return;
+  const text = rushShare(rush.day, { solved: rush.solved, points: rush.points }, SHARE_URL);
+  try {
+    if (navigator.share && matchMedia("(pointer: coarse)").matches) { await navigator.share({ text }); return; }
+  } catch { /* fall back */ }
+  try { await navigator.clipboard.writeText(text); toast("Copied — paste it anywhere.", 2000); }
+  catch { toast(text, 6000); }
 }
 
 // ---------------------------------------------------------------- star map
@@ -749,6 +906,11 @@ function onSettled() {
     if (game.phase === "won" && pts.length >= 2) spawnFx(pts[0], "constellation", now(), WHITE, { points: pts });
     toast(`${game.phase === "won" && game.sim?.satisfied.size ? "Solved! " : ""}✦ ${game.runScore} points`, 2400);
     if (game.phase !== "won") sfxMiss();
+    return;
+  }
+  if (rush) {
+    if (game.phase === "won") rushSolved();
+    else sfxMiss();
     return;
   }
   if (game.phase === "won") {
@@ -1080,6 +1242,7 @@ function setWorld(key: PhaseKey, lit: number) {
 
 function startLevel(n: number, isEndless = false) {
   endless = isEndless;
+  rush = null;
   sandbox = false;
   dailyN = 0;
   night = n;
@@ -1109,6 +1272,7 @@ function startLevel(n: number, isEndless = false) {
 
     game = new Game(gen.level);
     startClock(gen.level);
+    $("[data-action=hint]").hidden = false;
     $("[data-action=boosters]").hidden = false;
     $("[data-action=hint]").classList.remove("nudge");
     renderSkip();
@@ -1133,6 +1297,7 @@ const dailyCache = new Map<number, Level>();
 /** Today's puzzle — the same board for everyone, from the date alone. */
 function startDaily() {
   const n = todayNumber();
+  rush = null;
   endless = false;
   sandbox = false;
   dailyN = n;
@@ -1152,6 +1317,7 @@ function startDaily() {
     if (currentScreen !== "game" || dailyN !== n) return;
     game = new Game(level);
     startClock(level);
+    $("[data-action=hint]").hidden = false;
     $("[data-action=boosters]").hidden = false;
     $("[data-action=hint]").classList.remove("nudge");
     renderSkip();
@@ -1238,6 +1404,7 @@ async function shareDaily() {
 /** The Galaxy: every element, no rules, nothing recorded. */
 function startSandbox() {
   endless = false;
+  rush = null;
   dailyN = 0;
   sandbox = true;
   night = 0;
@@ -1250,6 +1417,7 @@ function startSandbox() {
   clearFx(); boardFx.clear();
   $("#win").hidden = true;
   $("#level-name").textContent = "The Galaxy";
+  $("[data-action=hint]").hidden = false;
   $("[data-action=boosters]").hidden = true;
   $("#level-meta").innerHTML = "<span>every element · build anything</span>";
   show("game");
@@ -1595,7 +1763,7 @@ document.addEventListener("click", (e) => {
       worldLevel = null;
       break;
     case "endless": endlessSeed = Date.now() >>> 0; startLevel(1, true); break;
-    case "home": show("title"); break;
+    case "home": rush = null; $("#rush-card").hidden = true; show("title"); break;
     case "howto": renderHowto(); $("#howto").hidden = false; sfxInfo(); break;
     case "close-howto": $("#howto").hidden = true; break;
     case "mute": toggleMuted(); renderToggles(); if (!isMuted()) sfxSelect(); break;
@@ -1627,7 +1795,12 @@ document.addEventListener("click", (e) => {
       if (h !== "none") sfxHint();
       break;
     }
+    case "rush": startRush(); break;
+    case "rush-again": $("#rush-card").hidden = true; startRush(); break;
+    case "rush-share": void shareRush(); break;
+    case "rush-home": $("#rush-card").hidden = true; rush = null; show("title"); break;
     case "skip": {
+      if (rush) { skipRush(); break; }
       if (!game || sandbox || endless || dailyN) return;
       if (!progress.skipped.includes(night)) progress.skipped.push(night);
       progress.unlocked = Math.max(progress.unlocked, night + 1);
@@ -1726,6 +1899,8 @@ if (import.meta.env.DEV) {
     board: () => game?.board,
     go: (n: number, e = false) => startLevel(n, e),
     galaxy: () => startSandbox(),
+    rush: () => startRush(),
+    rushState: () => rush,
     daily: () => startDaily(),
     solveIt: () => {
       if (!game?.level.solution) return "no stored solution";

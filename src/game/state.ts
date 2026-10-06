@@ -709,6 +709,9 @@ export interface Progress {
   medals: Record<number, number>;
   /** night -> its constellation, for the star map. */
   maps: Record<number, Constellation>;
+  /** Moon Rush: the best run of each day, and of all time. */
+  rushBest: Record<number, { solved: number; points: number }>;
+  rushRecord: { solved: number; points: number };
   /** Daily puzzle number -> the first solve of it. */
   daily: Record<number, DailyResult>;
   dailyStreak: number;
@@ -720,7 +723,7 @@ export interface Progress {
 export function loadProgress(): Progress {
   const fresh: Progress = {
     unlocked: 1, stars: {}, best: {}, runSeed: 1, streak: 0, bestStreak: 0, seen: [], phasesSeen: [], openAll: false, skipped: [],
-    stardust: 10, medals: {}, maps: {}, daily: {}, dailyStreak: 0, dailyBestStreak: 0, lastDaily: 0,
+    stardust: 10, medals: {}, maps: {}, rushBest: {}, rushRecord: { solved: 0, points: 0 }, daily: {}, dailyStreak: 0, dailyBestStreak: 0, lastDaily: 0,
   };
   try {
     const raw = localStorage.getItem(KEY);

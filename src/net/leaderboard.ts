@@ -12,20 +12,25 @@
  */
 import type { Level } from "../engine/types";
 
-export type BoardKind = "daily" | "night";
+export type BoardKind = "daily" | "night" | "rush";
 
 export interface Row { rank: number; name: string; points: number; used: number; fewest: number; seconds: number; you?: boolean }
 export interface BoardView { rows: Row[]; you?: Row; total: number }
 export interface LadderRow { rank: number; name: string; points: number; nights: number; you?: boolean }
 export interface LadderView { rows: LadderRow[]; you?: LadderRow; total: number }
 
-export interface SubmitBody {
-  kind: BoardKind;
-  id: number;
+export interface SolveBody {
   placements: { i: number; kind: string; mask?: number; from?: number }[];
   fireTick: number;
-  seconds?: number;
   hash: string;
+}
+
+export interface SubmitBody extends Partial<SolveBody> {
+  kind: BoardKind;
+  id: number;
+  seconds?: number;
+  /** Moon Rush: every puzzle solved in the run. */
+  solves?: (SolveBody & { k: number })[];
 }
 export interface SubmitResult { points: number; used: number; fewest: number; rank?: number; total?: number; improved: boolean }
 
