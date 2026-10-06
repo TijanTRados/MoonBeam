@@ -214,6 +214,25 @@ the moon waxes through the week to match. Solving it moves a day streak on; the
 share card shows one moon per Shine — dark for a miss, full for the solve — with
 points, pieces and time, and never the board.
 
+### The cube
+
+From Uranus on, some nights are cubes: the board is one face of a cube, and
+all six faces are copies of the grid you build on — a piece you place sits on
+every face at once. Light that runs off an edge carries on over it onto the
+next face, and the board swings round to follow. Each face sits differently in
+space, so the same mirror, met from another side, sends the light somewhere
+new; rings on a cube are only reachable by going round.
+
+The geometry is one generic rule (`src/engine/cube.ts`): every face has an
+outward normal and two in-plane axes, and a step over an edge keeps the
+light's position along it and turns it to head down the next face. It is
+tested exhaustively — every crossing on every face can be retraced. The
+generator walks over edges just as the light does, puts rings where light
+first arrives on another face, and rejects any cube whose solution would also
+work flat. Cubes are 5×5 and ask for a piece fewer: the cube is the hard part.
+A little net in the corner shows which faces the light has reached; tap one to
+look. The Galaxy has a Cube tool too.
+
 ### The moon's clock, and Moon Rush
 
 Every night has a generous time limit, shown as a ring round the moon that

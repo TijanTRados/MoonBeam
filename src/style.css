@@ -738,3 +738,22 @@ html.pixel .ranks-list li.you { box-shadow: inset 0 0 0 var(--px) var(--accent);
 html.pixel .icon-btn.nudge { animation: none; box-shadow: inset 0 0 0 var(--px) #fff6; }
 html.pixel .world-orb { border-radius: 0; clip-path: polygon(30% 0, 70% 0, 70% 10%, 90% 10%, 90% 30%, 100% 30%, 100% 70%, 90% 70%, 90% 90%, 70% 90%, 70% 100%, 30% 100%, 30% 90%, 10% 90%, 10% 70%, 0 70%, 0 30%, 10% 30%, 10% 10%, 30% 10%); }
 html.pixel .slot canvas, html.pixel .legend canvas { image-rendering: pixelated; }
+
+/* ------------------------------------------------------------- the cube */
+
+.board-wrap { perspective: 1100px; }
+#board { transform-origin: 50% 55%; backface-visibility: hidden; }
+.cube-net {
+  position: absolute; left: 10px; top: 8px;
+  display: grid; grid-template-columns: repeat(4, 14px); grid-template-rows: repeat(3, 14px); gap: 2px;
+  padding: 6px; background: rgba(18, 14, 38, 0.7); border: 1px solid var(--panel-edge); border-radius: 10px;
+}
+.cube-net[hidden] { display: none; }
+.cube-net button {
+  width: 14px; height: 14px; padding: 0; border: 1px solid rgba(226, 216, 255, 0.25);
+  background: rgba(255, 255, 255, 0.05); border-radius: 2px; cursor: pointer;
+}
+.cube-net button.lit { background: rgba(255, 233, 168, 0.55); box-shadow: 0 0 6px rgba(255, 233, 168, 0.7); }
+.cube-net button.on { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 0; }
+html.pixel .cube-net { border-radius: 0; clip-path: var(--notch); }
+html.pixel .cube-net button { border-radius: 0; }

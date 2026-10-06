@@ -55,6 +55,9 @@ let sandbox = false;
 /** Playing a daily puzzle: its number, or 0. */
 let dailyN = 0;
 
+/** On a cube: the face being looked at. Everything is built on all six at once. */
+let face = 0;
+
 /** A Moon Rush in progress, or null. */
 let rush: {
   day: number;
@@ -234,6 +237,7 @@ function frame(nowMs: number) {
       theme,
       cometCollected,
       gateFlash,
+      face,
       timer: rush ? Math.max(0, Math.min(1, rush.clock / RUSH_START))
         : limitSeconds ? Math.max(0, 1 - levelSeconds / limitSeconds) : undefined,
     });
@@ -281,6 +285,79 @@ function beginRun() {
   exitOrders = game.exitOrders();
   gates = game.gateCrossings();
   carries = game.carries();
+  crossings = [];
+  const segs = game.sim?.segments ?? [];
+  segs.forEach((sg, k) => {
+    const next = segs[k + 1];
+    if (sg.edge === "out" && next?.edge === "in") crossings.push({ out: sg, in: next });
+  });
+  if (game.level.cube && face !== 0) turnTo(0);
+  renderNet();
+}
+
+// ---------------------------------------------------------------- the cube
+
+/** Light going over an edge: the half-hop out to the rim, and the half-hop in on the next face. */
+let crossings: { out: Segment; in: Segment }[] = [];
+
+type Edge = "top" | "right" | "bottom" | "left";
+const edgeOfOut = (s: Segment, w: number): Edge =>
+  s.x1 < 0 ? "left" : s.x1 >= w ? "right" : s.y1 < 0 ? "top" : "bottom";
+const edgeOfIn = (s: Segment, w: number): Edge =>
+  s.x0 < 0 ? "left" : s.x0 >= w ? "right" : s.y0 < 0 ? "top" : "bottom";
+
+/**
+ * How the board swings for a turn of the cube. Leaving by an edge, the face
+ * swings away that way; arriving by an edge, the new face swings in from it.
+ * The same table serves both, since an edge away is an edge in.
+ */
+const SWING: Record<Edge, string> = {
+  right: "rotateY(-90deg)", left: "rotateY(90deg)", bottom: "rotateX(90deg)", top: "rotateX(-90deg)",
+};
+
+let turning = false;
+let pendingTurn: { to: number; exit: Edge; entry: Edge } | null = null;
+
+/** Turn the cube to show another face: swing this one away, swing the next one in. */
+function turnTo(to: number, exit: Edge = "right", entry: Edge = "left") {
+  if (to === face && !turning) return;
+  if (turning) { pendingTurn = { to, exit, entry }; return; }
+  turning = true;
+  const el = canvas;
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const done = () => {
+    turning = false;
+    const p = pendingTurn;
+    pendingTurn = null;
+    if (p && p.to !== face) turnTo(p.to, p.exit, p.entry);
+  };
+  if (reduced || !el.animate) { face = to; renderNet(); done(); return; }
+  sfxWhoosh();
+  el.animate([{ transform: "none" }, { transform: SWING[exit] }], { duration: 170, easing: "ease-in" })
+    .finished.then(() => {
+      face = to;
+      renderNet();
+      return el.animate([{ transform: SWING[entry] }, { transform: "none" }], { duration: 230, easing: "ease-out" }).finished;
+    })
+    .then(done, done);
+}
+
+/** The cube's net: six squares, the one on screen highlighted, lit ones glowing. Tap to look. */
+function renderNet() {
+  const net = $("#cube-net");
+  const cube = !!game?.level.cube;
+  net.hidden = !cube;
+  if (!cube || !game) return;
+  const lit = new Set<number>();
+  if (game.sim && game.phase !== "build") {
+    const front = game.frontHops;
+    for (const sg of game.sim.segments) if (sg.order <= front) lit.add(sg.face ?? 0);
+  }
+  for (const b of $$("#cube-net [data-face]")) {
+    const f = Number(b.dataset.face);
+    b.classList.toggle("on", f === face);
+    b.classList.toggle("lit", lit.has(f));
+  }
 }
 
 /** Things the reveal handles through their own events rather than on touch. */
@@ -345,6 +422,18 @@ function handleReveal(tick: RevealTick, t: number) {
     spawnFxAt(at.x, at.y, "warpFlash", t, { color: WARP_HUES[hue % WARP_HUES.length] });
     if (warp) gateFlash.set(`${warp.axis}:${warp.index}`, 1);
     if (t - lastWarp > 0.25) { sfxWarp(hue); lastWarp = t; }
+  }
+
+  // On a cube, the board turns to follow light leaving the face on screen.
+  if (game.level.cube) {
+    let follow: (typeof crossings)[number] | null = null;
+    for (const c of crossings) {
+      if (c.in.order > prev && c.in.order <= f && (c.out.face ?? 0) === (pendingTurn?.to ?? face)) follow = c;
+    }
+    if (follow) {
+      turnTo(follow.in.face ?? 0, edgeOfOut(follow.out, w), edgeOfIn(follow.in, w));
+    }
+    if (Math.floor(prev) !== Math.floor(f)) renderNet();
   }
 
   // A satellite picking the light up, and its dish putting it down.
@@ -623,6 +712,8 @@ function loadRushPuzzle() {
     if (rush !== r || currentScreen !== "game") return;
     const level = rushPuzzle(r.day, r.k);
     game = new Game(level);
+    face = 0;
+    renderNet();
     $("[data-action=boosters]").hidden = true;
     $("[data-action=hint]").hidden = true;
     winGlow = 0; flare = 0; climaxed = false;
@@ -1111,11 +1202,17 @@ function drawCardDemo(t: number, dt: number) {
   if (cycle < dt) cardFx.clear();
   const shown = cycle < 0.15 ? null : cardSim;
   const front = frontOf({ sim: shown, reveal });
+  // On a cube the demo shows whichever face the light has most recently reached.
+  let demoFace = 0;
+  if (shown && cardLevel.cube) {
+    let best = -1;
+    for (const sg of shown.segments) if (sg.order <= front && sg.order > best) { best = sg.order; demoFace = sg.face ?? 0; }
+  }
   scene(cardCtx, w, h, {
     level: cardLevel, sim: shown, tick: 0, reveal,
     starsLit: reveal > 0.7 ? cardSim.starsLit : EMPTY,
     hover: -1, time: t, winGlow: 0, hint: EMPTY,
-    particles: cardFx, dt, mini: true, theme, moonLit,
+    particles: cardFx, dt, mini: true, theme, moonLit, face: demoFace,
     cometCollected: shown ? shown.cometHits.filter((c) => c.order <= front).length : 0,
   });
 }
@@ -1177,6 +1274,7 @@ canvas.addEventListener("pointerdown", (e) => {
   else if (r === "rotated") sfxRotate();
   else sfxRemove();
   renderTray();
+  if (sandbox) { if (!game.level.cube) face = 0; renderNet(); }
 });
 
 function buzz(pattern: number | number[]) {
@@ -1305,6 +1403,8 @@ function startLevel(n: number, isEndless = false) {
 
     game = new Game(gen.level);
     startClock(gen.level);
+    face = 0;
+    renderNet();
     $("[data-action=hint]").hidden = false;
     $("[data-action=boosters]").hidden = false;
     $("[data-action=hint]").classList.remove("nudge");
@@ -1350,6 +1450,8 @@ function startDaily() {
     if (currentScreen !== "game" || dailyN !== n) return;
     game = new Game(level);
     startClock(level);
+    face = 0;
+    renderNet();
     $("[data-action=hint]").hidden = false;
     $("[data-action=boosters]").hidden = false;
     $("[data-action=hint]").classList.remove("nudge");
@@ -1444,6 +1546,8 @@ function startSandbox() {
   toolSel = 0;
   setWorld("neptune", 1);
   game = new Game(sandboxLevel());
+  face = 0;
+  renderNet();
   limitSeconds = 0;
   renderSkip();
   winGlow = 0; flare = 0; climaxed = false;
@@ -1485,7 +1589,7 @@ function openWorld(world: World, level: Level) {
 const FEATURE_NAMES: Partial<Record<string, string>> = {
   crystals: "crystals", tints: "tints", comets: "shooting stars", portals: "portals",
   terrain: "rough ground", warps: "warps", blackholes: "black holes", asteroids: "asteroids",
-  satellites: "satellites", movingWalls: "moving walls",
+  satellites: "satellites", movingWalls: "moving walls", cube: "the cube",
 };
 
 function renderMeta(l: Level) {
@@ -1693,7 +1797,7 @@ function moonIcon(lit: number, dim: boolean): HTMLCanvasElement {
 
 function renderHowto() {
   const keys: PieceKey[] = ["receptor", "mirror", "splitter", "star", "milkyway", "crystal", "tint",
-    "comet", "portal", "wall", "terrain", "warp", "blackhole", "asteroid", "satellite"];
+    "comet", "portal", "wall", "terrain", "warp", "blackhole", "asteroid", "satellite", "cube"];
   const ul = $("#howto-list");
   ul.innerHTML = "";
   for (const k of keys) {
@@ -1732,6 +1836,11 @@ document.addEventListener("click", (e) => {
     case "play": startLevel(progress.unlocked); break;
     case "nights": show("nights"); break;
     case "galaxy": startSandbox(); break;
+    case "face": {
+      const to = Number(el.dataset.face);
+      if (game?.level.cube && to !== face && game.phase !== "running") turnTo(to);
+      break;
+    }
     case "look":
       pixelLook = !pixelLook;
       savePixelLook(pixelLook);
@@ -1850,7 +1959,7 @@ document.addEventListener("click", (e) => {
       if (sandbox) {
         const tool = TOOLS[toolSel];
         const k = tool.kind === "moon" ? null
-          : tool.kind === "milkyway" || tool.kind === "warp" ? tool.kind as PieceKey : infoKey(tool.kind);
+          : tool.kind === "milkyway" || tool.kind === "warp" || tool.kind === "cube" ? tool.kind as PieceKey : infoKey(tool.kind);
         if (k) { cardQueue = []; openCard(k, false); }
         break;
       }

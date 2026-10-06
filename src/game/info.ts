@@ -10,12 +10,12 @@ import { Chan, Dir, Level, Light, Tile, TileKind, WHITE } from "../engine/types"
 import { LIGHT_LABEL } from "../render/theme";
 
 /** Tile kinds, plus the things on a board that are not tiles. */
-export type IconKind = TileKind | "warp" | "milkyway" | "moon";
+export type IconKind = TileKind | "warp" | "milkyway" | "moon" | "cube";
 
 export type PieceKey =
   | "mirror" | "splitter" | "crystal" | "tint" | "portal"
   | "blackhole" | "whitehole" | "wall" | "star" | "receptor"
-  | "asteroid" | "satellite" | "dish" | "comet" | "terrain" | "warp" | "milkyway";
+  | "asteroid" | "satellite" | "dish" | "comet" | "terrain" | "warp" | "milkyway" | "cube";
 
 export interface PieceInfo {
   key: PieceKey;
@@ -153,6 +153,16 @@ export const INFO: Record<PieceKey, PieceInfo> = {
       "the time the light comes back down, anything moving has moved.",
     icon: { kind: "satellite" },
   },
+  cube: {
+    key: "cube", name: "The cube",
+    short: "The board is a cube: light off one edge carries on over it onto the next face.",
+    detail: "Out here the board folds into a cube, and all six faces are copies of the grid " +
+      "you build on — a piece you place sits on every face at once. Light that runs off an " +
+      "edge carries on over it onto the next face, and the board turns to follow. Each face " +
+      "meets the light from a different side, so the same mirror can send it somewhere new. " +
+      "Rings here can only be reached by going round.",
+    icon: { kind: "cube" },
+  },
   dish: {
     key: "dish", name: "Dish",
     short: "Where a satellite puts its light back down. Otherwise light passes through.",
@@ -285,6 +295,14 @@ export function demoLevel(k: PieceKey): Level {
       put(l, 0, 1, { kind: "asteroid", track: [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: 1 }], phase: 1 });
       put(l, 1, 2, { kind: "receptor", mask: WHITE });
       return l;
+    case "cube":
+      // Off the right edge, onto the right face — where the same mirror,
+      // met from the other side, turns the light down into the ring.
+      l = board(5, 5, 1);
+      l.cube = true;
+      put(l, 1, 1, { kind: "mirrorB" });
+      put(l, 1, 3, { kind: "receptor", mask: WHITE });
+      return l;
     case "satellite":
     case "dish":
       l = board(4, 3, 0);
@@ -302,9 +320,10 @@ export function kindsIn(level: Level): PieceKey[] {
   for (const it of level.inventory) { const k = infoKey(it.kind); if (k) out.add(k); }
   if (level.warps?.length) out.add("warp");
   if (level.galaxy?.length) out.add("milkyway");
+  if (level.cube) out.add("cube");
   // Introduce things in the order a player would meet them. The dish is
   // explained on the satellite's card.
   const order: PieceKey[] = ["receptor", "mirror", "wall", "star", "milkyway", "splitter", "crystal",
-    "tint", "comet", "portal", "terrain", "warp", "blackhole", "whitehole", "asteroid", "satellite"];
+    "tint", "comet", "portal", "terrain", "warp", "blackhole", "whitehole", "asteroid", "satellite", "cube"];
   return order.filter((k) => out.has(k));
 }

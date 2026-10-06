@@ -123,6 +123,14 @@
       <canvas id="board" aria-label="Puzzle grid"></canvas>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="score" class="score-pill" aria-live="off" hidden></div>
+      <div id="cube-net" class="cube-net" hidden aria-label="Faces of the cube">
+        <button data-action="face" data-face="4" style="grid-area: 1 / 2" aria-label="Top face"></button>
+        <button data-action="face" data-face="3" style="grid-area: 2 / 1" aria-label="Left face"></button>
+        <button data-action="face" data-face="0" style="grid-area: 2 / 2" aria-label="Front face"></button>
+        <button data-action="face" data-face="1" style="grid-area: 2 / 3" aria-label="Right face"></button>
+        <button data-action="face" data-face="2" style="grid-area: 2 / 4" aria-label="Back face"></button>
+        <button data-action="face" data-face="5" style="grid-area: 3 / 2" aria-label="Bottom face"></button>
+      </div>
     </div>
 
     <div id="tray-caption" class="tray-caption" hidden>
