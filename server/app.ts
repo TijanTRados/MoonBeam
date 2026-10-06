@@ -6,6 +6,7 @@
  *   POST /api/score                   a solve: placements in, rank out
  *   GET  /api/board/daily/12?player=  a board's top 50, and where you stand
  *   GET  /api/board/night/21?player=
+ *   GET  /api/board/rush/12?player=   a day's Moon Rush
  *   GET  /api/ladder?player=          best points summed over every night
  *   POST /api/name    {player, name}  change your nickname
  *   POST /api/forget  {player}        delete everything stored about you
@@ -49,7 +50,7 @@ export function handle(store: Store, req: Req, now = new Date()): Res {
     return { status: 200, body: { ...v.result, improved, rank: b.you?.rank, total: b.total } };
   }
 
-  const m = path.match(/^\/api\/board\/(daily|night)\/(\d{1,6})$/);
+  const m = path.match(/^\/api\/board\/(daily|night|rush)\/(\d{1,6})$/);
   if (req.method === "GET" && m) {
     return { status: 200, body: store.board(m[1] as BoardKind, Number(m[2]), who) };
   }

@@ -41,6 +41,13 @@ export function better(a: Entry, b: Entry): number {
   return a.used - b.used || b.points - a.points || a.seconds - b.seconds || a.at - b.at;
 }
 
+/** In a rush, `used` counts puzzles solved: more is better, then points. */
+export function betterRush(a: Entry, b: Entry): number {
+  return b.used - a.used || b.points - a.points || a.at - b.at;
+}
+
+const order = (kind: BoardKind) => (kind === "rush" ? betterRush : better);
+
 export class Store {
   private data: Data = { names: {}, boards: {} };
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -59,7 +66,7 @@ export class Store {
     const board = this.data.boards[key] ??= {};
     const entry: Entry = { ...r, at: now };
     const old = board[player];
-    const improved = !old || better(entry, old) < 0;
+    const improved = !old || order(kind)(entry, old) < 0;
     if (improved) board[player] = entry;
     this.save();
     return improved;
@@ -67,7 +74,8 @@ export class Store {
 
   /** The top of a board, plus where `player` stands if they are further down. */
   board(kind: BoardKind, id: number, player?: string, top = 50): { rows: Row[]; you?: Row; total: number } {
-    const entries = Object.entries(this.data.boards[`${kind}:${id}`] ?? {}).sort((a, b) => better(a[1], b[1]));
+    const cmp = order(kind);
+    const entries = Object.entries(this.data.boards[`${kind}:${id}`] ?? {}).sort((a, b) => cmp(a[1], b[1]));
     const row = ([p, e]: [string, Entry], k: number): Row => ({
       rank: k + 1, name: this.data.names[p] ?? "?", points: e.points, used: e.used,
       fewest: e.fewest, seconds: e.seconds, ...(p === player ? { you: true } : {}),

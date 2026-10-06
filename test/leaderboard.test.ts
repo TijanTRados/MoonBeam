@@ -6,7 +6,8 @@ import { tileFrom } from "../src/engine/types";
 import { evaluate, simulate } from "../src/engine/simulate";
 import { bonuses, scoreRun } from "../src/game/score";
 import { dailyNumber, levelHash } from "../src/game/daily";
-import { Submission, cleanName, levelFor, verify } from "../server/verify";
+import { Level } from "../src/engine/types";
+import { Solve, Submission, checkSolve, cleanName, levelFor, rushLevelFor, verify } from "../server/verify";
 import { Store } from "../server/store";
 import { handle } from "../server/app";
 
@@ -21,16 +22,20 @@ function ok(name: string, cond: boolean, detail = "") {
 const NOW = new Date(2026, 9, 2, 12);   // daily #2
 const today = dailyNumber(NOW);
 
-function honest(kind: "daily" | "night", id: number, player = "player-aaaa1111", name = "Luna"): Submission {
-  const l = levelFor(kind, id);
+/** The stored solution of a level, fired at a moment it wins. */
+function solveOf(l: Level): Solve {
   // With something moving, the solution only wins at some moments: fire at one.
   const tiles = l.tiles.map((t) => ({ ...t }));
   for (const p of l.solution ?? []) tiles[p.i] = tileFrom(p, true);
-  const fireTick = Math.max(0, evaluate({ ...l, tiles }).winTick);
   return {
-    player, name, kind, id, fireTick, seconds: 90, hash: levelHash(l),
+    fireTick: Math.max(0, evaluate({ ...l, tiles }).winTick),
+    hash: levelHash(l),
     placements: (l.solution ?? []).map((p) => ({ i: p.i, kind: p.kind, mask: p.mask, from: p.from })),
   };
+}
+
+function honest(kind: "daily" | "night", id: number, player = "player-aaaa1111", name = "Luna"): Submission & Solve {
+  return { player, name, kind, id, seconds: 90, ...solveOf(levelFor(kind, id)) };
 }
 
 // ---------------------------------------------------------------- verification
@@ -60,7 +65,7 @@ function honest(kind: "daily" | "night", id: number, player = "player-aaaa1111",
   ok("an old daily is closed", !old.ok && old.status === 409);
 }
 
-const refuse = (name: string, mutate: (s: Submission) => void, status?: number) => {
+const refuse = (name: string, mutate: (s: Submission & Solve) => void, status?: number) => {
   const s = honest("night", 9);
   mutate(s);
   const v = verify(s, NOW);
@@ -84,6 +89,42 @@ ok("the solution used in these tests is real", sol.length > 0);
 
 ok("names are tidied", cleanName("  Moon   Child ") === "Moon Child");
 ok("names have limits", cleanName("x") === null && cleanName("a".repeat(17)) === null && cleanName("Mia_99") === "Mia_99");
+
+// ---------------------------------------------------------------- Moon Rush
+
+{
+  const run = (ks: number[]): Submission => ({
+    player: "player-rush0001", name: "Rusher", kind: "rush", id: today,
+    solves: ks.map((k) => ({ k, ...solveOf(rushLevelFor(today, k)) })),
+  });
+  const v = verify(run([1, 2, 4]), NOW);
+  ok("an honest rush is accepted, skips and all", v.ok, v.ok ? "" : v.reason);
+  if (v.ok) {
+    const sum = [1, 2, 4].reduce((t, k) => {
+      const c = checkSolve(rushLevelFor(today, k), solveOf(rushLevelFor(today, k)));
+      return t + (c.ok ? c.points : 0);
+    }, 0);
+    ok("a rush scores the sum of its solves", v.result.points === sum && v.result.used === 3, `${v.result.points} vs ${sum}`);
+  }
+  const outOfOrder = verify(run([2, 1]), NOW);
+  ok("refuses a rush out of order", !outOfOrder.ok);
+  const twice = verify(run([1, 1]), NOW);
+  ok("refuses the same puzzle twice", !twice.ok);
+  const wrong = run([1, 2]);
+  wrong.solves![1] = { ...wrong.solves![1], placements: [] };
+  const w = verify(wrong, NOW);
+  ok("refuses a rush with one bad solve", !w.ok && w.reason.startsWith("puzzle 2"), w.ok ? "" : w.reason);
+  ok("refuses a rush on a closed day", !verify({ ...run([1]), id: today - 5 }, NOW).ok);
+  ok("rush puzzles get harder", (rushLevelFor(today, 1).difficulty ?? 0) < (rushLevelFor(today, 12).difficulty ?? 0));
+
+  const store = new Store(null);
+  const r = (used: number, points: number) => ({ used, points, seconds: 0, fewest: 0 });
+  store.submit("p-a-aaaaaa", "A", "rush", 2, r(5, 900), 1);
+  store.submit("p-b-bbbbbb", "B", "rush", 2, r(7, 600), 2);
+  store.submit("p-c-cccccc", "C", "rush", 2, r(7, 800), 3);
+  ok("a rush ranks by puzzles solved, then points",
+     store.board("rush", 2).rows.map((x) => x.name).join() === "C,B,A");
+}
 
 // ---------------------------------------------------------------- ranking
 
