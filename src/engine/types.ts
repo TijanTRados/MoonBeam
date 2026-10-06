@@ -192,6 +192,12 @@ export interface Level {
   /** Rows and columns that wrap round. */
   warps?: Warp[];
   /**
+   * The board is one face of a cube, and all six faces are copies of it:
+   * light running off an edge carries on over it onto the next face. Square
+   * boards only. See `cube.ts`.
+   */
+  cube?: boolean;
+  /**
    * Cells covered by a galaxy. Not a piece — pieces can sit on it — but light
    * crossing it shines brighter and carries more points.
    */

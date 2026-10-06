@@ -2,7 +2,8 @@
  * The cube: its geometry must be consistent everywhere, because every puzzle
  * on it is a promise that light behaves the same over every edge.
  */
-import { DELTA, Dir } from "../src/engine/types";
+import { DELTA, Dir, Level, Tile, WHITE, idx } from "../src/engine/types";
+import { evaluate, simulate } from "../src/engine/simulate";
 import { FACES, cubeExit } from "../src/engine/cube";
 
 let passed = 0;
@@ -62,6 +63,43 @@ function walk(face: number, x: number, y: number, dir: Dir, steps: number) {
   for (let f = 0; f < 6; f++) for (let d = 0; d < 4; d++) seen.add(cubeExit(N, f, edge[d][0], edge[d][1], d as Dir).face);
   ok("all six faces are reachable", seen.size === 6);
   ok("six faces, each a proper frame", FACES.length === 6);
+}
+
+// ---------------------------------------------------------------- light on a cube
+
+function board(n: number, col: number): Level {
+  return {
+    id: "c", name: "c", w: n, h: n, cube: true,
+    tiles: Array.from({ length: n * n }, () => ({ kind: "empty" } as Tile)),
+    emitters: [{ x: col, y: 0, dir: Dir.Down, light: WHITE }],
+    inventory: [],
+  };
+}
+
+{
+  // Down from the moon, a mirror turns the light right and off the edge. On
+  // the right face the light meets the same mirror — it is a copy — from the
+  // other side, turns down, and finds a ring the front never sees.
+  const l = board(5, 1);
+  l.tiles[idx(l, 1, 1)] = { kind: "mirrorB" };
+  l.tiles[idx(l, 1, 3)] = { kind: "receptor", mask: WHITE };
+  const r = simulate(l);
+  ok("a ring is lit by light that went round the cube", r.satisfied.has(idx(l, 1, 3)));
+  const hit = r.segments.find((sg) => sg.x1 === 1 && sg.y1 === 3);
+  ok("…on the right face", hit?.face === 1, JSON.stringify(hit));
+  ok("the crossing is drawn as an edge out and in",
+     r.segments.some((sg) => sg.edge === "out" && (sg.face ?? 0) === 0) && r.segments.some((sg) => sg.edge === "in" && sg.face === 1));
+  ok("without the cube, the light just leaves", !simulate({ ...l, cube: false }).satisfied.size);
+  ok("so the level is won only on the cube", evaluate(l).won && !evaluate({ ...l, cube: false }).won);
+}
+
+{
+  // An empty cube: light runs round and round, and the simulation still ends.
+  const l = board(7, 3);
+  const r = simulate(l);
+  ok("light circling an empty cube terminates", r.segments.length > 7 && r.segments.length < 2000, `${r.segments.length}`);
+  const faces = new Set(r.segments.map((sg) => sg.face ?? 0));
+  ok("…having visited the faces round its loop", faces.size === 4, [...faces].join());
 }
 
 console.log(`\n  cube: ${passed} passed, ${failed} failed`);
