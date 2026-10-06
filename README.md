@@ -158,7 +158,12 @@ new idea at a time, with its explanation card.
 | 81+ | The Black Hole | everything, hardest, forever |
 
 Difficulty ramps across each world and steps back a little at the start of the
-next: new rules should be taught before they are tested. The moon waxes across
+next: new rules should be taught before they are tested. Each world's fifth night
+is a breather. The ramp was tuned from measurement (`tools/ramp-report.ts`):
+the first version asked for three or four pieces and two ring colours by night
+16 — in the same world that introduces colour — and playtesters stalled there.
+Now each world climbs about one point and the steep part is saved for the outer
+planets. The moon waxes across
 each world's ten nights — a thin crescent on the first, full on the tenth — so
 it doubles as a progress marker.
 
@@ -199,6 +204,103 @@ a small sawtooth so the curve breathes instead of grinding upward.
 Generating a night takes **3–190 ms**, so it happens on demand.
 
 ---
+
+### The daily puzzle
+
+Everyone gets the same board on the same day, and nothing is stored or served:
+the puzzle number is the date, and the date is the seed (`src/game/daily.ts`).
+Like a newspaper crossword it is gentle on Monday and hardest on Saturday, and
+the moon waxes through the week to match. Solving it moves a day streak on; the
+share card shows one moon per Shine — dark for a miss, full for the solve — with
+points, pieces and time, and never the board.
+
+### The cube
+
+From Uranus on, some nights are cubes: the board is one face of a cube, and
+all six faces are copies of the grid you build on — a piece you place sits on
+every face at once. Light that runs off an edge carries on over it onto the
+next face, and the board swings round to follow. Each face sits differently in
+space, so the same mirror, met from another side, sends the light somewhere
+new; rings on a cube are only reachable by going round.
+
+The geometry is one generic rule (`src/engine/cube.ts`): every face has an
+outward normal and two in-plane axes, and a step over an edge keeps the
+light's position along it and turns it to head down the next face. It is
+tested exhaustively — every crossing on every face can be retraced. The
+generator walks over edges just as the light does, puts rings where light
+first arrives on another face, and rejects any cube whose solution would also
+work flat. Cubes are 5×5 and ask for a piece fewer: the cube is the hard part.
+A little net in the corner shows which faces the light has reached; tap one to
+look. The Galaxy has a Cube tool too.
+
+### The moon's clock, and Moon Rush
+
+Every night has a generous time limit, shown as a ring round the moon that
+drains as the moon slowly sets. Solving with time left earns 2 points a
+second; running out costs only that bonus, never the night.
+
+**Moon Rush** is the arcade mode: ninety seconds on the clock, and every solve
+puts time back (15s plus 10s per piece) and serves a harder puzzle, climbing
+the worlds as it goes. Skipping costs 20 seconds; hints and boosters stay at
+home. Everyone gets the same sequence each day (`src/game/rush.ts`), and a
+rush has its own leaderboard — every solve in the run is replayed by the
+server; only the clock is taken on trust.
+
+### Getting unstuck, and stardust
+
+Hints are free and come in two steps per piece, following the light: first the
+cell pulses (*where*), then a faint ghost of the right piece appears (*what*).
+After three missed Shines the hint button glows; after five, a night can be
+skipped and come back to later.
+
+**Stardust** is earned by solving a night for the first time and from the
+daily puzzle (more the longer the streak), and spent on boosters that do a
+step for you: *place a piece*, *sweep decoys* out of the tray, or *perfect
+timing* — Shine waits for a moment that works when things are moving. Any hint
+or booster makes a solve "assisted": it still counts for progress, but it is
+not ranked. Stardust can buy your way past a night, never up a leaderboard.
+
+### Medals and the star map
+
+Every night has three medals — ☾ *lit* (solve it), ✦ *fewest* (with the fewest
+pieces possible) and ☄ *clean* (first Shine, no help) — shown on the Nights
+screen, so a solved night still has something to come back for. Each solve
+also adds that night's constellation to the **star map**: the route the light
+took, from the moon through every piece and goal, gathered into one sky by
+world.
+
+### Leaderboards
+
+Three boards: **today's daily**, **each campaign night**, and the **Moon ladder**
+(best points summed over every night). They rank by fewest pieces, then points,
+then time — the puzzle's own skill first, style second, speed only to break
+ties. Solves with a hint aren't ranked.
+
+**Nothing a client says about its score is trusted.** The engine is
+deterministic and every puzzle is a pure function of its number, so the game
+sends only *what it placed and when it pressed Shine*. The server
+(`server/`, Node's own `http`, no framework, no database) regenerates the same
+puzzle, checks the placements against the tray and the board, replays the shot
+with the same simulator, and scores it itself. A fingerprint of the board
+catches a client whose generator has drifted.
+
+Joining is opt-in, with a nickname. The server keeps a random player id, that
+nickname, and each player's best result per board — no email, no account, no
+IP addresses (those are used for rate limiting in memory only). Players can
+rename or leave, which deletes their scores.
+
+Running it:
+
+```bash
+npm run server                 # http://localhost:8787, scores in server/data/
+```
+
+In dev the game finds it on port 8787 of whatever host served the page. To put
+it online, run the same command on any Node 22 host (Render, Fly.io, Railway, a
+small VPS) with `ALLOWED_ORIGINS=https://tijantrados.github.io` and
+`DATA_FILE` on persistent storage, then set the repository variable
+`LEADERBOARD_URL` to its address — the Pages build picks it up. Unset, the game
+simply says leaderboards are off.
 
 ## The physics
 
@@ -322,6 +424,7 @@ Developer tools:
 ```bash
 npx tsx tools/gen-report.ts 20 --draw   # generate a pack and print the boards
 npx tsx tools/fit-difficulty.ts         # re-fit the difficulty model
+npx tsx tools/ramp-report.ts 1 40       # what makes each night hard, averaged over seeds
 npx tsx tools/profile.ts                # time the hot paths
 ```
 
@@ -356,12 +459,18 @@ src/
     moon.ts          the moon at any phase — only what is lit
     themes.ts        each world's sky, planet and constellations
     elements.ts      asteroids, satellites, shooting stars, warps, the Milky Way
+    starmap.ts       every solved night's constellation in one sky
   game/            the bridge between engine and DOM
     score.ts         points
     sandbox.ts       the Galaxy
+    daily.ts         the daily puzzle, streaks, the share card
+    stardust.ts      earning, and the boosters
+    medals.ts        the three medals; constellations for the star map
+  net/leaderboard.ts  opt-in player, submitting solves, an offline queue
   audio.ts         synthesised sound effects
   music.ts         the worlds' songs
   main.ts          screens, input, render loop
+server/            the leaderboard: verify by replay, rank, store
 test/
 tools/
 ```

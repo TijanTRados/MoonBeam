@@ -14,7 +14,7 @@
 import { Chan, Dir, Level, Light, Tile, TileKind, WHITE } from "../engine/types";
 import { Game } from "./state";
 
-export type ToolKind = TileKind | "milkyway" | "warp" | "moon";
+export type ToolKind = TileKind | "milkyway" | "warp" | "moon" | "cube";
 
 export interface Tool {
   key: string;
@@ -43,6 +43,7 @@ export const TOOLS: Tool[] = [
   { key: "terrain", kind: "terrain", name: "Rough ground" },
   { key: "wall", kind: "wall", name: "Wall" },
   { key: "moon", kind: "moon", name: "Moon" },
+  { key: "cube", kind: "cube", name: "Cube" },
 ];
 
 /** What tapping each tool's cell does, in a line, for the caption. */
@@ -60,6 +61,7 @@ export const TOOL_TIPS: Record<string, string> = {
   dish: "Pairs with the last satellite you placed.",
   asteroid: "Drifts back and forth along the free cells beside it.",
   moon: "Tap a column to move the moon over it.",
+  cube: "Tap anywhere to fold the board into a cube — or flatten it again.",
 };
 
 const TINTS: { from?: Light; mask: Light }[] = [
@@ -143,6 +145,12 @@ function apply(game: Game, i: number, x: number, y: number, tool: Tool): Sandbox
     }
     ws.splice(col, 1);
     return "removed";
+  }
+  if (tool.kind === "cube") {
+    // Warps and a cube don't mix: a cube's edges already lead somewhere.
+    l.cube = !l.cube || undefined;
+    if (l.cube) l.warps = [];
+    return "rotated";
   }
   if (tool.kind === "moon") {
     const e = l.emitters[0];

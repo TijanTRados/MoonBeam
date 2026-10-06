@@ -160,6 +160,9 @@ function drawConstellations(ctx: CanvasRenderingContext2D, w: number, h: number,
       if (tw > 0.9) glint(ctx, x, y, 6 * seen, 0.5 * seen, "#fff6e0");
     });
     const [lx, ly] = pts.reduce(([ax, ay], [x, y]) => [Math.min(ax, x), Math.max(ay, y)], [Infinity, -Infinity]);
+    // Names only where there is resolution to read them: at the pixel
+    // look's art resolution a label would be a smear across the sky.
+    if (Math.min(w, h) < 300) return;
     const labelSeen = clearance(lx, ly + 12, 20);
     ctx.fillStyle = alpha("#cfd8ff", 0.22 * breathe * labelSeen);
     ctx.font = "10px Nunito, system-ui, sans-serif";

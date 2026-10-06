@@ -17,6 +17,7 @@
 import {
   DELTA, Dir, Level, Light, Tile, WHITE, idx, inBounds, turnCCW, turnCW,
 } from "./types";
+import { cubeExit } from "./cube";
 
 /** How many cells light crosses per tick of board time. */
 export const HOPS_PER_TICK = 6;
@@ -42,6 +43,13 @@ export interface Segment {
    * back out of the opposite gate. Drawn only as far as the rim.
    */
   gate?: "in" | "out";
+  /** On a cube: the face this hop is on (0, the front, when unset). */
+  face?: number;
+  /**
+   * On a cube: "out" runs off the edge of its face, "in" comes over the edge
+   * onto the next. Drawn only as far as the rim, like a warp gate.
+   */
+  edge?: "in" | "out";
 }
 
 export interface SimResult {
@@ -92,7 +100,7 @@ export function resolveTiles(level: Level, tick: number): Tile[] {
   return out;
 }
 
-interface Ray { x: number; y: number; dir: Dir; light: Light; order: number }
+interface Ray { x: number; y: number; dir: Dir; light: Light; order: number; face: number }
 
 /**
  * Where each jumping tile sends light.
@@ -178,11 +186,12 @@ export function simulate(level: Level, tick = 0): SimResult {
   // repeat work already done, so this terminates loops, including the ones a
   // wrapping row or column makes very easy to build.
   const seen = new Set<number>();
-  const key = (x: number, y: number, d: Dir, l: Light, t: number) =>
-    (((y * w + x) * 4 + d) * 8 + l) * cycle + t;
+  const key = (x: number, y: number, d: Dir, l: Light, t: number, f: number) =>
+    ((((y * w + x) * 4 + d) * 8 + l) * cycle + t) * 6 + f;
+  const cube = !!level.cube && w === h;
 
   const queue: Ray[] = [];
-  for (const e of level.emitters) queue.push({ x: e.x, y: e.y, dir: e.dir, light: e.light, order: 0 });
+  for (const e of level.emitters) queue.push({ x: e.x, y: e.y, dir: e.dir, light: e.light, order: 0, face: 0 });
 
   let steps = 0;
   let depth = 0;
@@ -196,7 +205,8 @@ export function simulate(level: Level, tick = 0): SimResult {
     if (!inBounds(level, x, y) || light === 0) continue;
 
     const t = timeOf(ray.order);
-    const k = key(x, y, dir, light, t);
+    const face = ray.face;
+    const k = key(x, y, dir, light, t, face);
     if (seen.has(k)) { exhausted = true; continue; }
     seen.add(k);
 
@@ -207,45 +217,48 @@ export function simulate(level: Level, tick = 0): SimResult {
     touched.add(i);
     if (ray.order > depth) depth = ray.order;
 
-    // Sends light onward from this cell, drawing the hop that gets there. Light
-    // leaving the board through a warp gate comes back in on the far side.
-    const emit = (d: Dir, l: Light) => {
-      if (l === 0) return;
+    const onFace = cube ? { face } : {};
+
+    /**
+     * One hop of light from (fx, fy) heading `d`, drawn and queued. Off the
+     * edge it may come back through a warp gate, carry over onto the next
+     * face of a cube, or simply leave.
+     */
+    const hop = (fx: number, fy: number, d: Dir, l: Light, base: number) => {
       const dv = DELTA[d];
-      const nx = x + dv.x, ny = y + dv.y;
+      const nx = fx + dv.x, ny = fy + dv.y;
       if (!inBounds(level, nx, ny)) {
+        if (cube) {
+          // Over the edge: half a hop to the rim here, half from the rim there.
+          const s = cubeExit(w, face, fx, fy, d);
+          const rim = DELTA[s.dir];
+          segments.push({ x0: fx, y0: fy, x1: nx, y1: ny, light: l, order: base + 1, edge: "out", face });
+          segments.push({ x0: s.x - rim.x, y0: s.y - rim.y, x1: s.x, y1: s.y, light: l, order: base + 1, edge: "in", face: s.face });
+          queue.push({ x: s.x, y: s.y, dir: s.dir, light: l, order: base + 1, face: s.face });
+          return;
+        }
         const wr = wrapOf(nx, ny);
         if (wr) {
-          segments.push({ x0: x, y0: y, x1: nx, y1: ny, light: l, order: ray.order + 1, gate: "out" });
-          segments.push({ x0: wr.ex, y0: wr.ey, x1: wr.ix, y1: wr.iy, light: l, order: ray.order + 2, gate: "in" });
-          queue.push({ x: wr.ix, y: wr.iy, dir: d, light: l, order: ray.order + 2 });
+          segments.push({ x0: fx, y0: fy, x1: nx, y1: ny, light: l, order: base + 1, gate: "out" });
+          segments.push({ x0: wr.ex, y0: wr.ey, x1: wr.ix, y1: wr.iy, light: l, order: base + 2, gate: "in" });
+          queue.push({ x: wr.ix, y: wr.iy, dir: d, light: l, order: base + 2, face });
           return;
         }
       }
-      segments.push({ x0: x, y0: y, x1: nx, y1: ny, light: l, order: ray.order + 1 });
-      if (inBounds(level, nx, ny)) queue.push({ x: nx, y: ny, dir: d, light: l, order: ray.order + 1 });
+      segments.push({ x0: fx, y0: fy, x1: nx, y1: ny, light: l, order: base + 1, ...onFace });
+      if (inBounds(level, nx, ny)) queue.push({ x: nx, y: ny, dir: d, light: l, order: base + 1, face });
     };
+
+    // Sends light onward from this cell.
+    const emit = (d: Dir, l: Light) => { if (l !== 0) hop(x, y, d, l, ray.order); };
 
     /** Continue from another cell, still heading `dir`, after a jump of `extra` hops. */
     const jumpTo = (to: number, extra: number, seg: Partial<Segment>) => {
       const tx = to % w, ty = Math.floor(to / w);
-      segments.push({ x0: x, y0: y, x1: tx, y1: ty, light, order: ray.order + extra, ...seg });
-      const dv = DELTA[dir];
-      const nx = tx + dv.x, ny = ty + dv.y;
+      segments.push({ x0: x, y0: y, x1: tx, y1: ty, light, order: ray.order + extra, ...onFace, ...seg });
       // Step out of the exit through the same machinery as any other hop, so a
-      // jump that lands by the edge can still use a warp gate.
-      const base = ray.order + extra;
-      if (!inBounds(level, nx, ny)) {
-        const wr = wrapOf(nx, ny);
-        if (wr) {
-          segments.push({ x0: tx, y0: ty, x1: nx, y1: ny, light, order: base + 1, gate: "out" });
-          segments.push({ x0: wr.ex, y0: wr.ey, x1: wr.ix, y1: wr.iy, light, order: base + 2, gate: "in" });
-          queue.push({ x: wr.ix, y: wr.iy, dir, light, order: base + 2 });
-          return;
-        }
-      }
-      segments.push({ x0: tx, y0: ty, x1: nx, y1: ny, light, order: base + 1 });
-      if (inBounds(level, nx, ny)) queue.push({ x: nx, y: ny, dir, light, order: base + 1 });
+      // jump that lands by an edge can still use a warp gate or cross the cube.
+      hop(tx, ty, dir, light, ray.order + extra);
     };
 
     switch (tile.kind) {

@@ -8,8 +8,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "tsx test/engine.test.ts && tsx test/reveal.test.ts && tsx test/elements.test.ts && tsx test/phases.test.ts && tsx test/sandbox.test.ts",
+    "test": "tsx test/engine.test.ts && tsx test/reveal.test.ts && tsx test/elements.test.ts && tsx test/phases.test.ts && tsx test/sandbox.test.ts && tsx test/help.test.ts && tsx test/daily.test.ts && tsx test/leaderboard.test.ts && tsx test/cube.test.ts",
     "gen": "tsx tools/gen-report.ts",
+    "server": "tsx server/index.ts",
     "android": "npm run build && npx cap sync android && npx cap open android"
   },
   "devDependencies": {

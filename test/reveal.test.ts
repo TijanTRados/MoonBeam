@@ -128,6 +128,20 @@ function board(w: number, h: number, col: number): Level {
 }
 
 {
+  // A star on the very cell the moon shines into: no segment ends there, so
+  // it once went unpaid and unannounced.
+  const l = board(5, 5, 2);
+  l.tiles[idx(l, 2, 0)] = { kind: "star" };
+  l.tiles[idx(l, 2, 4)] = { kind: "receptor", mask: WHITE };
+  const g = new Game(l);
+  const { ticks } = play(g);
+  const tallied = ticks.reduce((n, t) => n + t.points, 0);
+  ok("a star on the moon's first cell is paid out", tallied === scoreRun(g.current(), g.sim!).total,
+     `tallied ${tallied}, expected ${scoreRun(g.current(), g.sim!).total}`);
+  ok("…and announced", ticks.some((t) => t.reached.includes(idx(l, 2, 0))));
+}
+
+{
   // A ring that needs two converging beams fires on the *second* arrival.
   // Crystal at (2,1): red heads right, blue heads left. Mirrors fold both down
   // column... simpler to check the rule directly: lastArrival >= firstArrival.

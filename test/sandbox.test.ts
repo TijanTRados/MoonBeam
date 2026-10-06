@@ -119,6 +119,20 @@ function blank(): Game {
   ok("tapping a tint changes what it converts", after.kind === "tint" && (after.from !== before.from || after.mask !== before.mask));
 }
 
+{
+  const g = blank();
+  sandboxTap(g, at(g, 3, 4), tool("warp"));
+  sandboxTap(g, at(g, 0, 0), tool("cube"));
+  ok("the cube tool folds the Galaxy into a cube", !!g.level.cube && g.level.warps!.length === 0);
+  // The same trick as the cube tests: a mirror sends light off the right
+  // edge, its copy on the right face turns it down into a ring.
+  sandboxTap(g, at(g, 1, 1), tool("mirror"));
+  sandboxTap(g, at(g, 1, 4), tool("receptor"));
+  ok("…and light goes round it", simulate(g.current(), 0).segments.some((sg) => (sg.face ?? 0) !== 0));
+  sandboxTap(g, at(g, 0, 0), tool("cube"));
+  ok("tapping again flattens it", !g.level.cube);
+}
+
 console.log(`\n  sandbox: ${passed} passed, ${failed} failed`);
 if (fails.length) {
   console.log("\n  failures:");

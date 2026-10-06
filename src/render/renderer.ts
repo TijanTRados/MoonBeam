@@ -36,6 +36,8 @@ export interface ViewState {
   winGlow: number;
   /** Cells to pulse as a hint, or empty. */
   hint: Set<number>;
+  /** Hinted cells showing a faint ghost of the piece that belongs there. */
+  hintGhost?: Map<number, Tile>;
 
   /** Particle system for this canvas; glitter is only emitted when present. */
   particles?: Particles;
@@ -62,6 +64,12 @@ export interface ViewState {
   cometCollected?: number;
   /** Warp gates flashing as light passes through them: "axis:index" -> 0..1. */
   gateFlash?: Map<string, number>;
+  /** Time left before the moon sets, 0..1; undefined for no clock. */
+  timer?: number;
+  /** Drawing for the pixel look: no film grain, the dither does that job. */
+  pixel?: boolean;
+  /** On a cube: which face is being looked at (0, the front, by default). */
+  face?: number;
 }
 
 export interface Layout {
@@ -154,6 +162,14 @@ export function draw(
     if (t.kind === "empty" || (t.track && t.track.length > 1)) continue;
     drawTile(ctx, L, i, t, v, front, arrival, theme, comets);
   }
+  // A second hint on a cell shows a ghost of exactly what belongs there.
+  for (const [i, t] of v.hintGhost ?? []) {
+    if (tiles[i]?.kind !== "empty") continue;
+    ctx.save();
+    ctx.globalAlpha = 0.32 + 0.14 * Math.sin(v.time * 3);
+    drawTile(ctx, L, i, t, { ...v, sim: null }, front, arrival, theme, comets);
+    ctx.restore();
+  }
   // Moving pieces are drawn where they are *between* cells, so they glide.
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i];
@@ -176,7 +192,7 @@ export function draw(
   ctx.restore();
 
   if (v.winGlow > 0) drawWinGlow(ctx, cw, ch, v);
-  if (!v.mini) drawGrain(ctx, cw, ch);
+  if (!v.mini && !v.pixel) drawGrain(ctx, cw, ch);
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
@@ -230,10 +246,18 @@ export function frontOf(v: { sim: SimResult | null; reveal: number }): number {
 }
 
 /** Cell index -> the earliest hop at which light arrives there. */
+/** The segments to draw: on a cube, only those on the face being looked at. */
+export function visibleSegments(v: { level: Level; sim: SimResult | null; face?: number }): Segment[] {
+  if (!v.sim) return [];
+  if (!v.level.cube) return v.sim.segments;
+  const f = v.face ?? 0;
+  return v.sim.segments.filter((s) => (s.face ?? 0) === f);
+}
+
 function arrivalOrders(v: ViewState): Map<number, number> {
   const m = new Map<number, number>();
   if (!v.sim) return m;
-  for (const s of v.sim.segments) {
+  for (const s of visibleSegments(v)) {
     const i = s.y1 * v.level.w + s.x1;
     const prev = m.get(i);
     if (prev === undefined || s.order < prev) m.set(i, s.order);
@@ -242,7 +266,7 @@ function arrivalOrders(v: ViewState): Map<number, number> {
 }
 
 function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
-  const segs = v.sim!.segments;
+  const segs = visibleSegments(v);
   if (!segs.length) return;
   const front = frontOf(v);
   const flare = v.flare ?? 0;
@@ -282,15 +306,15 @@ function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
       let c2 = cx(L, s.x1), d2 = cy(L, s.y1);
       // Warp gates sit on the rim, half a cell out: light runs into the gate
       // and comes back out of its twin, and is never drawn past the edge.
-      if (s.gate === "out") { c2 = (a + c2) / 2; d2 = (b + d2) / 2; }
-      if (s.gate === "in") { a = (a + c2) / 2; b = (b + d2) / 2; }
+      if (s.gate === "out" || s.edge === "out") { c2 = (a + c2) / 2; d2 = (b + d2) / 2; }
+      if (s.gate === "in" || s.edge === "in") { a = (a + c2) / 2; b = (b + d2) / 2; }
       const ex = a + (c2 - a) * p, ey = b + (d2 - b) * p;
       // Over the Milky Way the light shines brighter.
       const glow = inGalaxy(s) ? 1 : 0;
 
       // Light that runs off the board dissolves rather than stopping dead:
       // the last half-cell fades to nothing, and fizzes (see emitGlitter).
-      const leaving = !inGrid(L, s.x1, s.y1) && !s.gate;
+      const leaving = !inGrid(L, s.x1, s.y1) && !s.gate && !s.edge;
       const colourAt = (a0: number) => {
         if (!leaving) return alpha(c, a0);
         const g = ctx.createLinearGradient(a, b, c2, d2);
@@ -342,8 +366,8 @@ function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
     const p = progress(s);
     if (p <= 0 || p >= 1) continue;
     let a = cx(L, s.x0), b = cy(L, s.y0), c2 = cx(L, s.x1), d2 = cy(L, s.y1);
-    if (s.gate === "out") { c2 = (a + c2) / 2; d2 = (b + d2) / 2; }
-    if (s.gate === "in") { a = (a + c2) / 2; b = (b + d2) / 2; }
+    if (s.gate === "out" || s.edge === "out") { c2 = (a + c2) / 2; d2 = (b + d2) / 2; }
+    if (s.gate === "in" || s.edge === "in") { a = (a + c2) / 2; b = (b + d2) / 2; }
     const hx = a + (c2 - a) * p;
     const hy = b + (d2 - b) * p;
     const c = lightColor(s.light);
@@ -355,6 +379,23 @@ function drawBeams(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
     ctx.arc(hx, hy, L.cell * 0.45, 0, Math.PI * 2);
     ctx.fill();
     glint(ctx, hx, hy, L.cell * 0.5, 0.9, "#ffffff");
+  }
+
+  // On a cube, where the light goes over the edge — or comes over it — the
+  // rim glows: a doorway to another face.
+  for (const s of segs) {
+    if (!s.edge) continue;
+    const p = progress(s);
+    if (s.edge === "out" ? p < 1 : p <= 0) continue;
+    const rx = (cx(L, s.x0) + cx(L, s.x1)) / 2, ry = (cy(L, s.y0) + cy(L, s.y1)) / 2;
+    const c = lightColor(s.light);
+    const pulse = 0.7 + 0.3 * Math.sin(v.time * 5 + s.order);
+    const g = ctx.createRadialGradient(rx, ry, 0, rx, ry, L.cell * 0.6);
+    g.addColorStop(0, alpha(c, 0.7 * pulse));
+    g.addColorStop(1, alpha(c, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(rx, ry, L.cell * 0.6, 0, Math.PI * 2); ctx.fill();
+    glint(ctx, rx, ry, L.cell * 0.45 * pulse, 0.8, "#ffffff");
   }
 
   if (v.particles && v.dt) emitGlitter(v.particles, L, segs, progress, v);
@@ -401,7 +442,7 @@ function emitGlitter(
     }
 
     // Dissolving off the edge.
-    if (!inGrid(L, s.x1, s.y1) && !s.gate && p > 0.5) {
+    if (!inGrid(L, s.x1, s.y1) && !s.gate && !s.edge && p > 0.5) {
       let fizz = 14 * dt;
       while (fizz > 0) {
         if (Math.random() < fizz) {
@@ -966,17 +1007,62 @@ function drawReceptor(
 // ---------------------------------------------------------------- the moon
 
 function drawMoon(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
+  if (v.level.cube && (v.face ?? 0) !== 0) { drawFaceLabel(ctx, L, v.face ?? 0); return; }
   for (const e of v.level.emitters) {
     const px = cx(L, e.x);
     const py = L.oy - L.cell * 0.7;
     const r = L.cell * 0.38;
     const bob = Math.sin(v.time * 1.1) * L.cell * 0.035;
     const release = v.sim && v.reveal > 0 && v.reveal < 1.1 ? Math.max(0, 1 - v.reveal * 2.2) : 0;
+    // The clock: the moon slowly sinks as its time runs out.
+    const sink = v.timer === undefined ? 0 : (1 - v.timer) * L.cell * 0.12;
     ctx.save();
-    ctx.translate(px, py + bob);
+    ctx.translate(px, py + bob + sink);
+    if (v.timer !== undefined) drawMoonClock(ctx, r, v.timer, v.time);
     paintMoon(ctx, r, v.moonLit ?? 0.35, v.time, release, P.moonGlow);
     ctx.restore();
   }
+}
+
+const FACE_NAMES = ["front", "right", "back", "left", "top", "bottom"];
+
+/** Away from the front, the moon is round the other side: say which face this is. */
+function drawFaceLabel(ctx: CanvasRenderingContext2D, L: Layout, face: number) {
+  ctx.save();
+  ctx.font = `700 ${Math.max(9, L.cell * 0.32)}px "Pixelify Sans", monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = alpha("#e8dcff", 0.6);
+  ctx.fillText(`${FACE_NAMES[face]} face`, L.ox + (L.w * L.cell) / 2, L.oy - L.cell * 0.6);
+  ctx.restore();
+}
+
+/**
+ * A ring round the moon that drains as its time runs out — gold while there
+ * is plenty, turning rose and breathing faster in the last fifth.
+ */
+function drawMoonClock(ctx: CanvasRenderingContext2D, r: number, left: number, time: number) {
+  const R = r * 1.55;
+  const low = left < 0.2;
+  const pulse = low ? 0.6 + 0.4 * Math.sin(time * 9) : 1;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineWidth = Math.max(1.5, r * 0.12);
+  ctx.strokeStyle = alpha("#ffffff", 0.08);
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.stroke();
+  if (left > 0) {
+    ctx.strokeStyle = alpha(low ? "#ff8fb1" : "#ffd27d", 0.85 * pulse);
+    ctx.shadowColor = low ? "#ff8fb1" : "#ffd27d";
+    ctx.shadowBlur = r * 0.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left);
+    ctx.stroke();
+    // A bright bead on the leading end, like the moon's own satellite.
+    const a = -Math.PI / 2 + Math.PI * 2 * left;
+    ctx.fillStyle = alpha("#ffffff", 0.9 * pulse);
+    ctx.beginPath(); ctx.arc(Math.cos(a) * R, Math.sin(a) * R, ctx.lineWidth * 0.75, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawWinGlow(ctx: CanvasRenderingContext2D, w: number, h: number, v: ViewState) {
@@ -1032,7 +1118,7 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 export function drawIcon(
   ctx: CanvasRenderingContext2D,
   size: number,
-  kind: Tile["kind"] | "warp" | "milkyway" | "moon",
+  kind: Tile["kind"] | "warp" | "milkyway" | "moon" | "cube",
   mask?: Light,
   from?: Light,
 ) {
@@ -1046,6 +1132,23 @@ export function drawIcon(
   if (kind === "warp") {
     drawWarpGate(ctx, size * 0.3, size / 2, size * 0.9, true, 0, 0.3, 0);
     drawWarpGate(ctx, size * 0.7, size / 2, size * 0.9, true, 0, 0.3, 0);
+    return;
+  }
+  if (kind === "cube") {
+    // A little isometric cube, its faces gridded like the board.
+    const k = size * 0.3, ox = size / 2, oy = size / 2 + size * 0.04;
+    const top: [number, number][] = [[ox, oy - k], [ox + k * 0.87, oy - k / 2], [ox, oy], [ox - k * 0.87, oy - k / 2]];
+    const left: [number, number][] = [[ox - k * 0.87, oy - k / 2], [ox, oy], [ox, oy + k], [ox - k * 0.87, oy + k / 2]];
+    const right: [number, number][] = [[ox, oy], [ox + k * 0.87, oy - k / 2], [ox + k * 0.87, oy + k / 2], [ox, oy + k]];
+    const face = (pts: [number, number][], fill: string) => {
+      ctx.beginPath(); pts.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath();
+      ctx.fillStyle = fill; ctx.fill();
+      ctx.strokeStyle = alpha("#ffffff", 0.5); ctx.lineWidth = Math.max(1, size * 0.03); ctx.stroke();
+    };
+    face(top, "#8f7bd6"); face(left, "#5b4aa8"); face(right, "#3f3384");
+    // A beam over the edge, from the front-left face onto the right.
+    ctx.strokeStyle = "#fff3c4"; ctx.lineWidth = Math.max(1.2, size * 0.05); ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(ox - k * 0.6, oy + k * 0.15); ctx.lineTo(ox, oy + k * 0.45); ctx.lineTo(ox + k * 0.6, oy + k * 0.15); ctx.stroke();
     return;
   }
   if (kind === "moon") {

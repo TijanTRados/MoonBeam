@@ -4,9 +4,21 @@
     {
       "name": "moonbeam",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "autoPort": true,
       "port": 5273
+    },
+    {
+      "name": "moonbeam-leaderboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "server"
+      ],
+      "port": 8787
     }
   ]
 }

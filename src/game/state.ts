@@ -5,12 +5,14 @@
  * tray, the board's clock, and how far the run animation has got. Knows nothing
  * about canvas or elements.
  */
-import { Level, Light, Tile, TileKind } from "../engine/types";
+import { Level, Light, Tile, TileKind, tileFrom } from "../engine/types";
 import {
   HOPS_PER_TICK, Outcome, SimResult, cycleLength, simulate, wins,
 } from "../engine/simulate";
 import { poolKey } from "../engine/solver";
 import { POINTS, segmentPoints } from "./score";
+import type { DailyResult } from "./daily";
+import type { Constellation } from "./medals";
 
 export type Phase = "build" | "running" | "won" | "lost";
 
@@ -70,9 +72,20 @@ export class Game {
   reveal = 0;
   starsLit = new Set<number>();
   outcome: Outcome | null = null;
+  /** Cells a hint has pointed at. */
   hint = new Set<number>();
+  /** …and, after a second hint on the same cell, exactly what goes there. */
+  hintGhost = new Map<number, Tile>();
+  /** Hints taken on this level. Any at all makes a solve "assisted". */
+  hintsUsed = 0;
+  /** Boosters used on this level. Like hints, any at all makes it assisted. */
+  boostersUsed = 0;
+  /** Perfect timing: Shine waits for a moment that works. */
+  timingAid = false;
   /** Times Shine has been pressed on this level. One means solved first try. */
   runs = 0;
+  /** Shines on this level that did not solve it. */
+  misses = 0;
   /** Points scored so far by the run being revealed. */
   runScore = 0;
 
@@ -134,6 +147,13 @@ export class Game {
     }
     this.selected = 0;
     this.runs = 0;
+    this.misses = 0;
+    this.hintsUsed = 0;
+    this.boostersUsed = 0;
+    this.timingAid = false;
+    // Hints belong to the level, not to the board: Clear keeps them.
+    this.hint.clear();
+    this.hintGhost.clear();
     this.reset();
   }
 
@@ -146,7 +166,6 @@ export class Game {
     this.runScore = 0;
     this.starsLit.clear();
     this.outcome = null;
-    this.hint.clear();
   }
 
   get moving(): boolean {
@@ -243,7 +262,6 @@ export class Game {
     this.outcome = null;
     this.runScore = 0;
     this.starsLit.clear();
-    this.hint.clear();
   }
 
   /** The level as the engine sees it right now. */
@@ -263,7 +281,6 @@ export class Game {
     this.front = 0;
     this.runScore = 0;
     this.starsLit.clear();
-    this.hint.clear();
 
     const lv = this.current();
     this.fireAt = this.fireTick;
@@ -298,6 +315,14 @@ export class Game {
       if (f === undefined || g.order < f) this.firstArrival.set(i, g.order);
       const l = this.lastArrival.get(i);
       if (l === undefined || g.order > l) this.lastArrival.set(i, g.order);
+    }
+    // The cell the moon shines into first is never the end of a segment, so
+    // nothing above records the light reaching it. A star or ring sitting
+    // there is reached at the very start of the run.
+    for (const e of lv.emitters) {
+      const i = e.y * lv.w + e.x;
+      if (!this.firstArrival.has(i)) this.firstArrival.set(i, 0.01);
+      if (!this.lastArrival.has(i)) this.lastArrival.set(i, 0.01);
     }
     this.cometAt = new Map(sim.cometHits.map((c) => [c.i, c.order]));
 
@@ -346,6 +371,11 @@ export class Game {
       for (const c of sim.cometHits) this.climaxAt = Math.max(this.climaxAt, c.order);
     }
     return this.outcome;
+  }
+
+  /** The tick of board time the last run was fired at. */
+  get firedAt(): number {
+    return this.fireAt;
   }
 
   /** How far the light has travelled, in hops from the moon. */
@@ -469,6 +499,7 @@ export class Game {
       // Board time carries on from wherever the light left it.
       this.clock = this.fireAt + this.front / HOPS_PER_TICK;
       this.phase = this.outcome?.won ? "won" : "lost";
+      if (!this.outcome?.won) this.misses++;
       out.settled = true;
     }
     return out;
@@ -481,35 +512,173 @@ export class Game {
     return pts.sort((a, b) => (this.eventOrder(a) ?? 0) - (this.eventOrder(b) ?? 0));
   }
 
-  /** Reveal one piece of the known solution that is not already correct. */
-  takeHint(): boolean {
+  /**
+   * The route as a constellation, for the star map: where the moon's light
+   * came in, then every piece and goal it touched, in the order it got there.
+   */
+  route(): number[] {
+    if (!this.sim) return [];
+    const lv = this.current();
+    const cells = new Set(this.constellation());
+    this.board.forEach((t, i) => { if (t.placed && this.firstArrival.has(i)) cells.add(i); });
+    const entry = lv.emitters.map((e) => e.y * lv.w + e.x);
+    const rest = [...cells].filter((i) => !entry.includes(i))
+      .sort((a, b) => (this.eventOrder(a) ?? 0) - (this.eventOrder(b) ?? 0));
+    return [...entry, ...rest];
+  }
+
+  /** Is the piece the known solution wants at this placement already there, exactly? */
+  private isRight(p: { i: number; kind: TileKind; mask?: Light; from?: Light }): boolean {
+    const cur = this.board[p.i];
+    return cur.kind === p.kind && cur.mask === p.mask && cur.from === p.from;
+  }
+
+  /**
+   * A hint, in two steps per piece, following the light from the moon.
+   *
+   * The first hint on a piece says *where*: its cell pulses. Asking again says
+   * *what*: a faint ghost of exactly the right piece, the right way round,
+   * appears in it. Pieces already right are skipped, so hints always point at
+   * the next thing that is actually wrong.
+   */
+  takeHint(): "where" | "what" | "none" {
     const sol = this.level.solution;
-    if (!sol?.length) return false;
-    for (const p of sol) {
-      const cur = this.board[p.i];
-      const ok = cur.kind === p.kind || (isMirror(cur.kind) && isMirror(p.kind));
-      if (!ok) { this.hint.add(p.i); return true; }
+    if (!sol?.length) return "none";
+    const next = sol.find((p) => !this.isRight(p));
+    if (!next) return "none";
+    this.hintsUsed++;
+    if (!this.hint.has(next.i)) { this.hint.add(next.i); return "where"; }
+    this.hintGhost.set(next.i, tileFrom(next));
+    return "what";
+  }
+
+  // ---------------------------------------------------------------- boosters
+
+  /** Pieces in the tray the known solution has no use for. */
+  get decoys(): number {
+    const need = new Map<string, number>();
+    for (const p of this.level.solution ?? []) {
+      const k = poolKey(p.kind, p.mask, p.from);
+      need.set(k, (need.get(k) ?? 0) + 1);
     }
-    // Everything is in the right place already — nudge the orientations.
-    for (const p of sol) if (this.board[p.i].kind !== p.kind) { this.hint.add(p.i); return true; }
-    return false;
+    return this.tray.reduce((n, s) => n + Math.max(0, s.total - (need.get(s.key) ?? 0)), 0);
+  }
+
+  /** Is there a solution piece not yet in place? */
+  get nextPiece(): boolean {
+    return (this.level.solution ?? []).some((p) => !this.isRight(p));
+  }
+
+  /**
+   * Place the next piece of the known solution, following the light. If the
+   * tray has run out of that piece, one placed somewhere it doesn't belong
+   * is picked up first. Returns the cell, or -1.
+   */
+  placeNext(): number {
+    if (this.phase === "running") return -1;
+    const sol = this.level.solution ?? [];
+    const p = sol.find((q) => !this.isRight(q));
+    if (!p) return -1;
+    const key = poolKey(p.kind, p.mask, p.from);
+    const slot = this.tray.find((s) => s.key === key);
+    if (!slot) return -1;
+
+    // Whatever the player put in that cell goes back to the tray.
+    const here = this.board[p.i];
+    if (here.placed) {
+      const back = this.slotFor(here.kind, here.mask, here.from);
+      if (back) back.used--;
+      this.board[p.i] = { kind: "empty" };
+    }
+    if (slot.used >= slot.total) {
+      const wrong = this.board.findIndex((t, i) => t.placed && poolKey(t.kind, t.mask, t.from) === key &&
+        !sol.some((q) => q.i === i && this.isRight(q)));
+      if (wrong < 0) return -1;
+      this.board[wrong] = { kind: "empty" };
+      slot.used--;
+    }
+    this.board[p.i] = tileFrom(p, true);
+    slot.used++;
+    this.boostersUsed++;
+    this.invalidate();
+    return p.i;
+  }
+
+  /** Take the decoys out of the tray. Placed decoys go back first. */
+  sweepDecoys(): number {
+    const need = new Map<string, number>();
+    for (const p of this.level.solution ?? []) {
+      const k = poolKey(p.kind, p.mask, p.from);
+      need.set(k, (need.get(k) ?? 0) + 1);
+    }
+    const before = this.decoys;
+    for (const s of this.tray) {
+      const keep = need.get(s.key) ?? 0;
+      // Pick up any of this kind beyond what is kept, wrong ones first.
+      while (s.used > keep) {
+        const sol = this.level.solution ?? [];
+        let i = this.board.findIndex((t, j) => t.placed && poolKey(t.kind, t.mask, t.from) === s.key &&
+          !sol.some((q) => q.i === j && this.isRight(q)));
+        if (i < 0) i = this.board.findIndex((t) => t.placed && poolKey(t.kind, t.mask, t.from) === s.key);
+        if (i < 0) break;
+        this.board[i] = { kind: "empty" };
+        s.used--;
+      }
+      s.total = Math.min(s.total, keep);
+    }
+    this.tray = this.tray.filter((s) => s.total > 0);
+    this.selected = Math.min(this.selected, Math.max(0, this.tray.length - 1));
+    if (before > 0) { this.boostersUsed++; this.invalidate(); }
+    return before;
+  }
+
+  /**
+   * The first tick from now at which the board as it stands would win, within
+   * one full cycle of everything moving — or null if no moment works.
+   */
+  nextWinningTick(): number | null {
+    const lv = this.current();
+    const from = this.fireTick;
+    for (let t = from; t < from + Math.max(1, this.cycle); t++) {
+      if (wins(lv, simulate(lv, t))) return t;
+    }
+    return null;
+  }
+
+  /** Hinted cells that still need something done to them. */
+  get openHints(): Set<number> {
+    const sol = this.level.solution ?? [];
+    const out = new Set<number>();
+    for (const i of this.hint) {
+      const p = sol.find((q) => q.i === i);
+      if (p && !this.isRight(p)) out.add(i);
+    }
+    return out;
+  }
+
+  /** Ghosts still worth showing: only on cells not yet holding the right piece. */
+  get openGhosts(): Map<number, Tile> {
+    const out = new Map<number, Tile>();
+    const open = this.openHints;
+    for (const [i, t] of this.hintGhost) if (open.has(i)) out.set(i, t);
+    return out;
   }
 
   /** The result of the finished run, for the card. */
-  score(): { solved: boolean; stars: number; totalStars: number; par: number; used: number; firstTry: boolean; points: number } {
+  score(): { solved: boolean; stars: number; totalStars: number; par: number; used: number; firstTry: boolean; points: number; assisted: boolean } {
     return {
       solved: this.phase === "won",
       stars: this.outcome?.starsLit.size ?? 0,
       totalStars: this.outcome?.totalStars ?? 0,
       par: this.level.par ?? 0,
       used: this.used,
-      firstTry: this.runs === 1,
+      firstTry: this.runs === 1 && this.hintsUsed === 0 && this.boostersUsed === 0,
       points: this.runScore,
+      assisted: this.hintsUsed > 0 || this.boostersUsed > 0,
     };
   }
 }
 
-const isMirror = (k: TileKind) => k === "mirrorA" || k === "mirrorB";
 
 // ---------------------------------------------------------------- progress
 
@@ -532,11 +701,29 @@ export interface Progress {
   phasesSeen: string[];
   /** Every night open, whatever has been solved — for jumping around and testing. */
   openAll: boolean;
+  /** Nights skipped rather than solved; they can be come back to any time. */
+  skipped: number[];
+  /** Earned by solving, spent on boosters. */
+  stardust: number;
+  /** night -> medals won (a bitmask; see medals.ts). */
+  medals: Record<number, number>;
+  /** night -> its constellation, for the star map. */
+  maps: Record<number, Constellation>;
+  /** Moon Rush: the best run of each day, and of all time. */
+  rushBest: Record<number, { solved: number; points: number }>;
+  rushRecord: { solved: number; points: number };
+  /** Daily puzzle number -> the first solve of it. */
+  daily: Record<number, DailyResult>;
+  dailyStreak: number;
+  dailyBestStreak: number;
+  /** The last daily puzzle solved. */
+  lastDaily: number;
 }
 
 export function loadProgress(): Progress {
   const fresh: Progress = {
-    unlocked: 1, stars: {}, best: {}, runSeed: 1, streak: 0, bestStreak: 0, seen: [], phasesSeen: [], openAll: false,
+    unlocked: 1, stars: {}, best: {}, runSeed: 1, streak: 0, bestStreak: 0, seen: [], phasesSeen: [], openAll: false, skipped: [],
+    stardust: 10, medals: {}, maps: {}, rushBest: {}, rushRecord: { solved: 0, points: 0 }, daily: {}, dailyStreak: 0, dailyBestStreak: 0, lastDaily: 0,
   };
   try {
     const raw = localStorage.getItem(KEY);

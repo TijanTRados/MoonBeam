@@ -28,13 +28,24 @@
     <p class="tagline">The moon is shining.<br />Build the path.</p>
     <nav class="menu">
       <button class="btn btn-primary" data-action="play">Continue</button>
-      <button class="btn" data-action="nights">Nights</button>
-      <button class="btn" data-action="endless">Endless</button>
-      <button class="btn btn-galaxy" data-action="galaxy">Galaxy <small>every element</small></button>
+      <div class="menu-row">
+        <button class="btn btn-daily" data-action="daily">Daily <small id="daily-sub"></small></button>
+        <button class="btn btn-rush" data-action="rush">Moon Rush <small>beat the moonset</small></button>
+      </div>
+      <div class="menu-row">
+        <button class="btn" data-action="nights">Nights</button>
+        <button class="btn" data-action="map">Star map</button>
+      </div>
+      <button class="btn" data-action="ranks">Leaderboards</button>
+      <div class="menu-row">
+        <button class="btn" data-action="endless">Endless</button>
+        <button class="btn btn-galaxy" data-action="galaxy">Galaxy</button>
+      </div>
       <button class="btn btn-quiet" data-action="howto">How to play</button>
     </nav>
     <p class="credit">A 2015 thesis project, rebuilt.<br />Tijan Tomislav Radoš</p>
     <div class="title-toggles">
+      <button class="icon-btn" data-action="look" aria-label="Switch to the smooth look">▦</button>
       <button class="icon-btn" data-action="music" aria-label="Turn music off">🎵</button>
       <button class="icon-btn" data-action="mute" aria-label="Turn sounds off">🔊</button>
     </div>
@@ -53,6 +64,47 @@
     <div id="night-grid" class="night-grid"></div>
   </section>
 
+  <!-- ---------------------------------------------------------- star map -->
+  <section id="screen-map" class="screen">
+    <header class="bar">
+      <button class="icon-btn" data-action="home" aria-label="Back">‹</button>
+      <div class="bar-title">
+        <h2>Star map</h2>
+        <div id="map-count" class="meta"></div>
+      </div>
+      <span class="bar-spacer"></span>
+    </header>
+    <div id="map-wrap" class="map-wrap">
+      <canvas id="map-canvas" class="map-canvas" aria-label="Every solved night, as a constellation"></canvas>
+      <div id="map-spacer"></div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------- leaderboards -->
+  <section id="screen-ranks" class="screen">
+    <header class="bar">
+      <button class="icon-btn" data-action="home" aria-label="Back">‹</button>
+      <h2>Leaderboards</h2>
+      <span class="bar-spacer"></span>
+    </header>
+    <div class="ranks">
+      <div class="tabs" role="tablist">
+        <button class="tab" data-action="ranks-tab" data-tab="daily">Today</button>
+        <button class="tab" data-action="ranks-tab" data-tab="night">Nights</button>
+        <button class="tab" data-action="ranks-tab" data-tab="ladder">Moon ladder</button>
+      </div>
+      <div id="ranks-nightnav" class="nightnav" hidden>
+        <button class="icon-btn" data-action="ranks-step" data-step="-1" aria-label="Previous night">‹</button>
+        <span id="ranks-night">Night 1</span>
+        <button class="icon-btn" data-action="ranks-step" data-step="1" aria-label="Next night">›</button>
+      </div>
+      <p class="muted small center ranks-how">Fewest pieces first, then points, then time. ✓ marks the fewest possible.<br />Points here leave out the first-try bonus, which can't be checked.</p>
+      <ol id="ranks-list" class="ranks-list"></ol>
+      <p id="ranks-you" class="ranks-you"></p>
+      <p id="ranks-me" class="muted small center"></p>
+    </div>
+  </section>
+
   <!-- ---------------------------------------------------------- game -->
   <section id="screen-game" class="screen">
     <header class="bar">
@@ -63,6 +115,7 @@
       </div>
       <button class="icon-btn" data-action="music" aria-label="Turn music off">🎵</button>
       <button class="icon-btn" data-action="mute" aria-label="Turn sounds off">🔊</button>
+      <button class="chip" data-action="boosters" aria-label="Stardust boosters">✦ <span class="dust-count">0</span></button>
       <button class="icon-btn" data-action="hint" aria-label="Hint">?</button>
     </header>
 
@@ -70,6 +123,14 @@
       <canvas id="board" aria-label="Puzzle grid"></canvas>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="score" class="score-pill" aria-live="off" hidden></div>
+      <div id="cube-net" class="cube-net" hidden aria-label="Faces of the cube">
+        <button data-action="face" data-face="4" style="grid-area: 1 / 2" aria-label="Top face"></button>
+        <button data-action="face" data-face="3" style="grid-area: 2 / 1" aria-label="Left face"></button>
+        <button data-action="face" data-face="0" style="grid-area: 2 / 2" aria-label="Front face"></button>
+        <button data-action="face" data-face="1" style="grid-area: 2 / 3" aria-label="Right face"></button>
+        <button data-action="face" data-face="2" style="grid-area: 2 / 4" aria-label="Back face"></button>
+        <button data-action="face" data-face="5" style="grid-area: 3 / 2" aria-label="Bottom face"></button>
+      </div>
     </div>
 
     <div id="tray-caption" class="tray-caption" hidden>
@@ -80,6 +141,7 @@
 
     <div class="controls">
       <button class="btn btn-ghost" data-action="reset">Clear</button>
+      <button class="btn btn-ghost btn-skip" data-action="skip" hidden>Skip ›</button>
       <button class="btn btn-primary btn-run" data-action="run">Shine</button>
     </div>
   </section>
@@ -92,8 +154,11 @@
       <p id="win-sub" class="muted"></p>
       <div id="win-badges" class="win-badges"></div>
       <div id="win-points" class="win-points"></div>
+      <p id="win-dust" class="win-dust"></p>
+      <p id="win-rank" class="win-rank" hidden></p>
       <div class="card-actions">
         <button class="btn btn-ghost" data-action="replay">Again</button>
+        <button class="btn btn-ghost" data-action="share" hidden>Share</button>
         <button class="btn btn-primary" data-action="next">Next night</button>
       </div>
     </div>
@@ -122,6 +187,54 @@
       <p id="world-new" class="world-new"></p>
       <div class="card-actions">
         <button class="btn btn-primary" data-action="world-ok">Let's go</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- rush over -->
+  <div id="rush-card" class="overlay" hidden>
+    <div class="card">
+      <div class="piece-tag">Moon Rush</div>
+      <h3>The moon has set</h3>
+      <div class="rush-big"><b id="rush-solved">0</b><span>nights solved</span></div>
+      <p id="rush-points" class="rush-points"></p>
+      <p id="rush-best" class="muted small"></p>
+      <p id="rush-rank" class="win-rank"></p>
+      <div class="card-actions">
+        <button class="btn btn-ghost" data-action="rush-home">Home</button>
+        <button class="btn btn-ghost" data-action="rush-share">Share</button>
+        <button class="btn btn-primary" data-action="rush-again">Again</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- boosters -->
+  <div id="boost-card" class="overlay" hidden>
+    <div class="card card-wide">
+      <h3>Boosters</h3>
+      <p class="muted">You have <b class="dust">✦ <span id="boost-balance">0</span></b> stardust. Hints stay free — boosters do a step
+        for you. Solves with a booster aren't ranked.</p>
+      <ul id="boost-list" class="boost-list"></ul>
+      <p class="muted small">Earn stardust by solving a night for the first time, and from the daily puzzle — more the longer your streak.</p>
+      <div class="card-actions">
+        <button class="btn btn-ghost" data-action="close-boosters">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------- join -->
+  <div id="join-card" class="overlay" hidden>
+    <div class="card">
+      <h3>Join the leaderboards?</h3>
+      <p class="muted">
+        Pick a nickname. Only that name and your scores are kept — no email,
+        no account. You can rename or leave any time.
+      </p>
+      <input id="join-name" class="text-input" maxlength="16" autocomplete="nickname" placeholder="Nickname" />
+      <p id="join-error" class="join-error"></p>
+      <div class="card-actions">
+        <button class="btn btn-ghost" data-action="join-no">Not now</button>
+        <button class="btn btn-primary" data-action="join-yes">Join</button>
       </div>
     </div>
   </div>
