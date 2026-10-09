@@ -594,7 +594,6 @@ body { -webkit-user-select: none; user-select: none; touch-action: manipulation;
 }
 .btn-daily small { display: block; font-size: 11px; color: var(--ink-dim); font-weight: 600; margin-top: 2px; }
 .btn-daily.done { background: var(--panel); border-color: var(--panel-edge); color: var(--ink); }
-.meta .clock { font-variant-numeric: tabular-nums; color: var(--moon); }
 .card-actions .btn[hidden] { display: none; }
 /* The pixel face's 2 and 5 read as 8 and S at small sizes: numbers get the round face. */
 .card h3 .num { font-family: Nunito, sans-serif; font-weight: 800; }
@@ -655,7 +654,6 @@ body .text-input { -webkit-user-select: text; user-select: text; }
   color: #ffe066; font: 800 14px Nunito, sans-serif; cursor: pointer; white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.chip[hidden] { display: none; }
 .dust { color: #ffe066; }
 .win-dust { margin: 10px 0 0; color: #ffe066; font-weight: 800; min-height: 0; }
 .win-dust:empty { display: none; }
