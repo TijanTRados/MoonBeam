@@ -25,14 +25,13 @@ import {
   BoardKind, SolveBody, SubmitBody, fetchBoard, fetchLadder, flushPending, forgetMe, leaderboardsEnabled,
   placementsOf, player, rename, setPlayer, submit, validName,
 } from "./net/leaderboard";
-import { ViewState, cellAt, computeLayout, draw, drawIcon, frontOf } from "./render/renderer";
+import { cellAt, computeLayout, draw, drawIcon, frontOf } from "./render/renderer";
 import { PathSeg, clearFx, spawnFx, spawnFxAt } from "./render/fx";
 import { Particles, rand } from "./render/particles";
 import { LIGHT_LABEL } from "./render/theme";
 import { DEFAULT_THEME, THEMES, Theme } from "./render/themes";
 import { moonForNight, moonPath } from "./render/moon";
 import { WARP_HUES } from "./render/elements";
-import { drawPixelated, loadPixelLook, savePixelLook } from "./render/pixel";
 import {
   isMuted, isMusicMuted, musicBrightness, musicDuck,
   sfxAsteroid, sfxCardStar, sfxClimax, sfxComet, sfxDissolve, sfxHint, sfxHit, sfxInfo, sfxMiss,
@@ -82,43 +81,6 @@ let theme: Theme = DEFAULT_THEME;
 let moonLit = 0.35;
 
 const now = () => performance.now() / 1000;
-
-// ---------------------------------------------------------------- the look
-
-/** Pixel art with modern glow, or the smooth vector look. */
-let pixelLook = loadPixelLook();
-document.documentElement.classList.toggle("pixel", pixelLook);
-
-/** Art pixels per board cell in the pixel look: enough for a piece to read. */
-const ART_PER_CELL = 13;
-
-/** Draw a scene in whichever look is on. */
-function scene(c: CanvasRenderingContext2D, w: number, h: number, v: ViewState, artPx?: number) {
-  if (!pixelLook) { draw(c, w, h, v); return; }
-  const px = artPx ?? computeLayout(w, h, v.level).cell / ART_PER_CELL;
-  drawPixelated(c, w, h, px, (a, lw, lh) => draw(a, lw, lh, { ...v, pixel: true }));
-}
-
-/**
- * A piece's icon for the tray and the how-to list. In the pixel look it is
- * drawn tiny and scaled up crisp, so the tray matches the board.
- */
-function iconCanvas(size: number, kind: Parameters<typeof drawIcon>[2], mask?: Light, from?: Light): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  const cc = c.getContext("2d")!;
-  if (pixelLook) {
-    const art = Math.round(size / 3);
-    c.width = c.height = art;
-    c.classList.add("pixelated");
-    drawIcon(cc, art, kind, mask, from);
-  } else {
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
-    c.width = c.height = Math.round(size * dpr);
-    cc.scale(dpr, dpr);
-    drawIcon(cc, size, kind, mask, from);
-  }
-  return c;
-}
 
 // ---------------------------------------------------------------- screens
 
@@ -216,7 +178,7 @@ function frame(nowMs: number) {
     const cometCollected = game.sim && game.phase !== "build"
       ? game.sim.cometHits.filter((c) => c.order <= front).length : 0;
 
-    scene(ctx, w, h, {
+    draw(ctx, w, h, {
       level: game.current(),
       sim: game.sim,
       tick: game.tick,
@@ -871,14 +833,7 @@ function drawMap(t: number) {
   if (!mapLayout) return;
   const { w, h, dpr } = fitCanvas(mapCanvas);
   mapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const L = mapLayout, scroll = mapWrap.scrollTop;
-  if (!pixelLook) { drawStarMap(mapCtx, w, h, t, mapWorlds, L, scroll); return; }
-  drawPixelated(mapCtx, w, h, 2, (c, lw, lh) => {
-    c.save();
-    c.scale(lw / w, lh / h);
-    drawStarMap(c, w, h, t, mapWorlds, L, scroll);
-    c.restore();
-  }, 0.7);
+  drawStarMap(mapCtx, w, h, t, mapWorlds, mapLayout, mapWrap.scrollTop);
 }
 
 mapCanvas.addEventListener("click", (e) => {
@@ -1146,7 +1101,7 @@ function drawTitleArt(t: number, dt: number) {
   const { w, h, dpr } = fitCanvas(titleCanvas);
   titleCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   titleCtx.globalAlpha = 0.5;
-  scene(titleCtx, w, h, {
+  draw(titleCtx, w, h, {
     level: titleLevel, sim: titleSim, tick: 0, reveal: 1,
     starsLit: titleStars, hover: -1, time: t, winGlow: 0, hint: EMPTY,
     particles: titleFx, dt, moonLit: 0.3,
@@ -1208,7 +1163,7 @@ function drawCardDemo(t: number, dt: number) {
     let best = -1;
     for (const sg of shown.segments) if (sg.order <= front && sg.order > best) { best = sg.order; demoFace = sg.face ?? 0; }
   }
-  scene(cardCtx, w, h, {
+  draw(cardCtx, w, h, {
     level: cardLevel, sim: shown, tick: 0, reveal,
     starsLit: reveal > 0.7 ? cardSim.starsLit : EMPTY,
     hover: -1, time: t, winGlow: 0, hint: EMPTY,
@@ -1296,7 +1251,13 @@ function renderTray() {
     b.setAttribute("aria-label", `${pieceName(slot.kind, slot.mask, slot.from)}, ${left} left`);
     b.setAttribute("aria-pressed", String(k === game!.selected));
 
-    b.appendChild(iconCanvas(42, slot.kind, slot.mask, slot.from));
+    const c = document.createElement("canvas");
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    c.width = c.height = Math.round(42 * dpr);
+    const cc = c.getContext("2d")!;
+    cc.scale(dpr, dpr);
+    drawIcon(cc, 42, slot.kind, slot.mask, slot.from);
+    b.appendChild(c);
 
     const n = document.createElement("span");
     n.className = "count";
@@ -1322,7 +1283,13 @@ function renderToolTray(tray: HTMLElement) {
     b.setAttribute("aria-label", tool.name);
     b.setAttribute("aria-pressed", String(k === toolSel));
     b.title = tool.name;
-    b.appendChild(iconCanvas(42, tool.kind, tool.mask, tool.from));
+    const c = document.createElement("canvas");
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    c.width = c.height = Math.round(42 * dpr);
+    const cc = c.getContext("2d")!;
+    cc.scale(dpr, dpr);
+    drawIcon(cc, 42, tool.kind, tool.mask, tool.from);
+    b.appendChild(c);
     b.addEventListener("click", () => {
       toolSel = k;
       sfxSelect();
@@ -1774,9 +1741,9 @@ function renderNights() {
 /** A little moon at a phase: just the lit part, no ghost of the rest. */
 function moonIcon(lit: number, dim: boolean): HTMLCanvasElement {
   const c = document.createElement("canvas");
-  const dpr = pixelLook ? 0.5 : Math.min(window.devicePixelRatio || 1, 3);
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
   c.width = c.height = Math.round(26 * dpr);
-  c.className = pixelLook ? "moon-icon pixelated" : "moon-icon";
+  c.className = "moon-icon";
   const cc = c.getContext("2d")!;
   cc.scale(dpr, dpr);
   cc.translate(13, 13);
@@ -1805,7 +1772,13 @@ function renderHowto() {
     const li = document.createElement("li");
     li.dataset.action = "piece-about";
     li.dataset.piece = k;
-    li.appendChild(iconCanvas(38, info.icon.kind, info.icon.mask, info.icon.from));
+    const c = document.createElement("canvas");
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    c.width = c.height = Math.round(38 * dpr);
+    const cc = c.getContext("2d")!;
+    cc.scale(dpr, dpr);
+    drawIcon(cc, 38, info.icon.kind, info.icon.mask, info.icon.from);
+    li.appendChild(c);
     const txt = document.createElement("div");
     txt.innerHTML = `<b>${info.name}</b><span>${info.short}</span>`;
     li.appendChild(txt);
@@ -1841,15 +1814,6 @@ document.addEventListener("click", (e) => {
       if (game?.level.cube && to !== face && game.phase !== "running") turnTo(to);
       break;
     }
-    case "look":
-      pixelLook = !pixelLook;
-      savePixelLook(pixelLook);
-      document.documentElement.classList.toggle("pixel", pixelLook);
-      renderToggles();
-      if (game) renderTray();
-      toast(pixelLook ? "Pixel look" : "Smooth look", 1200);
-      sfxSelect();
-      break;
     case "map": show("map"); break;
     case "boosters": openBoosters(); break;
     case "boost": useBooster(el.dataset.boost as BoosterKey); break;
@@ -2020,10 +1984,6 @@ function renderToggles() {
     b.textContent = off ? "🔇" : "🔊";
     b.setAttribute("aria-label", off ? "Turn sounds on" : "Turn sounds off");
     b.setAttribute("aria-pressed", String(off));
-  }
-  for (const b of $$("[data-action=look]")) {
-    b.textContent = pixelLook ? "▦" : "◍";
-    b.setAttribute("aria-label", pixelLook ? "Switch to the smooth look" : "Switch to the pixel look");
   }
   for (const b of $$("[data-action=music]")) {
     const off = isMusicMuted();

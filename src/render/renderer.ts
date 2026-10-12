@@ -66,8 +66,6 @@ export interface ViewState {
   gateFlash?: Map<string, number>;
   /** Time left before the moon sets, 0..1; undefined for no clock. */
   timer?: number;
-  /** Drawing for the pixel look: no film grain, the dither does that job. */
-  pixel?: boolean;
   /** On a cube: which face is being looked at (0, the front, by default). */
   face?: number;
 }
@@ -192,7 +190,7 @@ export function draw(
   ctx.restore();
 
   if (v.winGlow > 0) drawWinGlow(ctx, cw, ch, v);
-  if (!v.mini && !v.pixel) drawGrain(ctx, cw, ch);
+  if (!v.mini) drawGrain(ctx, cw, ch);
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, L: Layout, v: ViewState) {
