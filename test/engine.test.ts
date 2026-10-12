@@ -273,6 +273,13 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
      JSON.stringify(b.level.tiles) + JSON.stringify(b.level.inventory));
 }
 
+/**
+ * The sweep: fifteen levels at every difficulty. Generating is the slow part
+ * of this suite, so the checks below that only need "some generated levels"
+ * reuse these rather than making their own.
+ */
+const sweep: { d: number; s: number; g: ReturnType<typeof generateLevel> }[] = [];
+
 {
   // Every generated level must be solvable, across the whole difficulty range.
   //
@@ -290,6 +297,7 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
       const g = generateLevel(s * 7919 + d * 104729, { difficulty: d });
       totalMs += performance.now() - t0;
       checked++;
+      sweep.push({ d, s, g });
 
       const sol = g.level.solution;
       if (!sol || sol.length === 0) { noSolution++; continue; }
@@ -323,13 +331,11 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
   // And the solver must independently rediscover a solution on easy levels,
   // where doing so is cheap. This is what proves the two halves agree.
   let unsolved = 0;
-  for (let d = 1; d <= 4; d++) {
-    for (let s = 0; s < 5; s++) {
-      const g = generateLevel(s * 313 + d * 7717, { difficulty: d });
-      if (!solve(g.level, { firstOnly: true, nodeBudget: 60_000 }).solved) unsolved++;
-    }
+  const easy = sweep.filter((e) => e.d <= 4 && e.s < 5);
+  for (const { g } of easy) {
+    if (!solve(g.level, { firstOnly: true, nodeBudget: 60_000 }).solved) unsolved++;
   }
-  ok("solver independently solves easy generated levels", unsolved === 0, `${unsolved}/20 unsolved`);
+  ok("solver independently solves easy generated levels", unsolved === 0, `${unsolved}/${easy.length} unsolved`);
 }
 
 {
@@ -337,23 +343,20 @@ const put = (l: Level, x: number, y: number, t: Tile) => { l.tiles[idx(l, x, y)]
   // could drop a portal on top of a piece it had already placed, and excavation
   // then cleared that cell believing it was lifting the piece.
   let odd = 0, withPortals = 0;
-  for (const d of [8, 9, 10]) {
-    for (let s = 0; s < 10; s++) {
-      const g = generateLevel(s * 6151 + d * 911, { difficulty: d });
-      const n = g.level.tiles.filter((t) => t.kind === "portal").length;
-      if (n) withPortals++;
-      if (n % 2 !== 0) odd++;
-    }
+  const high = sweep.filter((e) => e.d >= 8);
+  for (const { g } of high) {
+    const n = g.level.tiles.filter((t) => t.kind === "portal").length;
+    if (n) withPortals++;
+    if (n % 2 !== 0) odd++;
   }
   ok("portals are always paired", odd === 0, `${odd} levels with an odd count`);
-  ok("portals actually appear at high difficulty", withPortals > 0, `${withPortals}/30`);
+  ok("portals actually appear at high difficulty", withPortals > 0, `${withPortals}/${high.length}`);
 }
 
 {
   // Generated levels must have a real goal and a real tray.
   let noReceptor = 0, emptyTray = 0;
-  for (let s = 0; s < 30; s++) {
-    const g = generateLevel(s * 31337, { difficulty: 6 });
+  for (const { g } of sweep) {
     if (!g.level.tiles.some((t) => t.kind === "receptor")) noReceptor++;
     if (g.level.inventory.reduce((a, b) => a + b.count, 0) === 0) emptyTray++;
   }
